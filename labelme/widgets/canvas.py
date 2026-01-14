@@ -326,7 +326,7 @@ class Canvas(QtWidgets.QWidget):
             if isNew:
                 return self.tr("Click first corner for rectangle")
             else:
-                return self.tr("Click opposite corner for rectangle")
+                return self.tr("Click opposite corner for rectangle (Shift for square)")
         return self.tr("Click to add point")
 
     def mouseMoveEvent(self, a0: QtGui.QMouseEvent) -> None:
@@ -387,7 +387,19 @@ class Canvas(QtWidgets.QWidget):
                     0 if is_shift_pressed else 1,
                 ]
             elif self.createMode == "rectangle":
-                self.line.points = [self.current[0], pos]
+                if is_shift_pressed:
+                    start_point = self.current[0]
+                    dx = pos.x() - start_point.x()
+                    dy = pos.y() - start_point.y()
+                    size = min(abs(dx), abs(dy))
+                    square_pos = QPointF(
+                        start_point.x() + (size if dx >= 0 else -size),
+                        start_point.y() + (size if dy >= 0 else -size),
+                    )
+                    self.line.points = [start_point, square_pos]
+                    self.prevMovePoint = square_pos
+                else:
+                    self.line.points = [self.current[0], pos]
                 self.line.point_labels = [1, 1]
                 self.line.close()
             elif self.createMode == "circle":
