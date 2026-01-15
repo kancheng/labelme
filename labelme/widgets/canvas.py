@@ -389,13 +389,13 @@ class Canvas(QtWidgets.QWidget):
             elif self.createMode == "rectangle":
                 if is_shift_pressed:
                     start_point = self.current[0]
-                    dx = pos.x() - start_point.x()
-                    dy = pos.y() - start_point.y()
-                    size = min(abs(dx), abs(dy))
-                    square_pos = QPointF(
-                        start_point.x() + (size if dx >= 0 else -size),
-                        start_point.y() + (size if dy >= 0 else -size),
+                    size = pos - start_point
+                    min_size = min(abs(size.x()), abs(size.y()))
+                    end_offset = QPointF(
+                        (min_size if size.x() >= 0 else -min_size),
+                        (min_size if size.y() >= 0 else -min_size),
                     )
+                    square_pos = start_point + end_offset
                     self.line.points = [start_point, square_pos]
                     self.prevMovePoint = square_pos
                 else:
