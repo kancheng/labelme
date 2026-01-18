@@ -8,7 +8,6 @@ import os
 import os.path as osp
 import re
 import types
-import typing
 import webbrowser
 
 import imgviz
@@ -26,12 +25,14 @@ from PyQt5.QtWidgets import QMessageBox
 from labelme import __appname__
 from labelme import __version__
 from labelme._automation import bbox_from_text
+from labelme._automation._osam_session import OsamSession
 from labelme._label_file import LabelFile
 from labelme._label_file import LabelFileError
 from labelme._label_file import ShapeDict
 from labelme.config import get_config
 from labelme.shape import Shape
-from labelme.widgets import AiPromptWidget
+from labelme.widgets import AiAssistedAnnotationWidget
+from labelme.widgets import AiTextToAnnotationWidget
 from labelme.widgets import BrightnessContrastDialog
 from labelme.widgets import Canvas
 from labelme.widgets import FileDialogPreview
@@ -72,6 +73,7 @@ class _ZoomMode(enum.Enum):
 class MainWindow(QtWidgets.QMainWindow):
     filename: str | None
     _config: dict
+    _text_osam_session: OsamSession | None = None
     _is_changed: bool = False
     _copied_shapes: list[Shape]
     _zoom_mode: _ZoomMode
@@ -825,49 +827,23 @@ class MainWindow(QtWidgets.QMainWindow):
             ),
         )
 
+        self._ai_assisted_annotation_widget: AiAssistedAnnotationWidget = (
+            AiAssistedAnnotationWidget(
+                default_model=self._config["ai"]["default"],
+                on_model_changed=self.canvas.set_ai_model_name,
+                parent=self,
+            )
+        )
+        self._ai_assisted_annotation_widget.setEnabled(False)
         selectAiModel = QtWidgets.QWidgetAction(self)
-        selectAiModel.setDefaultWidget(QtWidgets.QWidget())
-        selectAiModel.defaultWidget().setLayout(QtWidgets.QVBoxLayout())
-        #
-        selectAiModelLabel = QtWidgets.QLabel(self.tr("AI Mask Model"))
-        selectAiModelLabel.setAlignment(QtCore.Qt.AlignCenter)
-        selectAiModel.defaultWidget().layout().addWidget(selectAiModelLabel)
-        #
-        self._selectAiModelComboBox = QtWidgets.QComboBox()
-        selectAiModel.defaultWidget().layout().addWidget(self._selectAiModelComboBox)
-        MODEL_NAMES: list[tuple[str, str]] = [
-            ("efficientsam:10m", "EfficientSam (speed)"),
-            ("efficientsam:latest", "EfficientSam (accuracy)"),
-            ("sam:100m", "Sam (speed)"),
-            ("sam:300m", "Sam (balanced)"),
-            ("sam:latest", "Sam (accuracy)"),
-            ("sam2:small", "Sam2 (speed)"),
-            ("sam2:latest", "Sam2 (balanced)"),
-            ("sam2:large", "Sam2 (accuracy)"),
-        ]
-        for model_name, model_ui_name in MODEL_NAMES:
-            self._selectAiModelComboBox.addItem(model_ui_name, userData=model_name)
-        model_ui_names: list[str] = [model_ui_name for _, model_ui_name in MODEL_NAMES]
-        if self._config["ai"]["default"] in model_ui_names:
-            model_index = model_ui_names.index(self._config["ai"]["default"])
-        else:
-            logger.warning(
-                "Default AI model is not found: %r",
-                self._config["ai"]["default"],
-            )
-            model_index = 0
-        self._selectAiModelComboBox.currentIndexChanged.connect(
-            lambda index: self.canvas.set_ai_model_name(
-                model_name=self._selectAiModelComboBox.itemData(index)
-            )
-        )
-        self._selectAiModelComboBox.setCurrentIndex(model_index)
+        selectAiModel.setDefaultWidget(self._ai_assisted_annotation_widget)
 
-        self._ai_prompt_widget: AiPromptWidget = AiPromptWidget(
-            on_submit=self._submit_ai_prompt, parent=self
+        self._ai_text_to_annotation_widget: AiTextToAnnotationWidget = (
+            AiTextToAnnotationWidget(on_submit=self._submit_ai_prompt, parent=self)
         )
+        self._ai_text_to_annotation_widget.setEnabled(False)
         ai_prompt_action = QtWidgets.QWidgetAction(self)
-        ai_prompt_action.setDefaultWidget(self._ai_prompt_widget)
+        ai_prompt_action.setDefaultWidget(self._ai_text_to_annotation_widget)
 
         self.addToolBar(
             Qt.TopToolBarArea,
@@ -1051,18 +1027,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage(message, delay)
 
     def _submit_ai_prompt(self, _) -> None:
-        texts = self._ai_prompt_widget.get_text_prompt().split(",")
+        texts = self._ai_text_to_annotation_widget.get_text_prompt().split(",")
 
-        model_name: str = "yoloworld"
+        model_name: str = self._ai_text_to_annotation_widget.get_model_name()
         model_type = osam.apis.get_model_type_by_name(model_name)
-        model_type = typing.cast(type[osam.types.Model], model_type)
         if not (_is_already_downloaded := model_type.get_size() is not None):
             if not download_ai_model(model_name=model_name, parent=self):
                 return
+        if (
+            self._text_osam_session is None
+            or self._text_osam_session.model_name != model_name
+        ):
+            self._text_osam_session = OsamSession(model_name=model_name)
 
         boxes, scores, labels = bbox_from_text.get_bboxes_from_texts(
-            model=model_name,
+            session=self._text_osam_session,
             image=utils.img_qt_to_arr(self.image)[:, :, :3],
+            image_id=str(hash(self.imagePath)),
             texts=texts,
         )
 
@@ -1086,8 +1067,8 @@ class MainWindow(QtWidgets.QMainWindow):
             boxes=boxes,
             scores=scores,
             labels=labels,
-            iou_threshold=self._ai_prompt_widget.get_iou_threshold(),
-            score_threshold=self._ai_prompt_widget.get_score_threshold(),
+            iou_threshold=self._ai_text_to_annotation_widget.get_iou_threshold(),
+            score_threshold=self._ai_text_to_annotation_widget.get_score_threshold(),
             max_num_detections=100,
         )
 
@@ -1096,23 +1077,9 @@ class MainWindow(QtWidgets.QMainWindow):
         scores = scores[keep]
         labels = labels[keep]
 
-        shape_dicts: list[dict] = bbox_from_text.get_shapes_from_bboxes(
-            boxes=boxes,
-            scores=scores,
-            labels=labels,
-            texts=texts,
+        shapes: list[Shape] = bbox_from_text.get_shapes_from_bboxes(
+            boxes=boxes, scores=scores, labels=labels, texts=texts
         )
-
-        shapes: list[Shape] = []
-        for shape_dict in shape_dicts:
-            shape = Shape(
-                label=shape_dict["label"],
-                shape_type=shape_dict["shape_type"],
-                description=shape_dict["description"],
-            )
-            for point in shape_dict["points"]:
-                shape.addPoint(QtCore.QPointF(*point))
-            shapes.append(shape)
 
         self.canvas.storeShapes()
         self._load_shapes(shapes, replace=False)
@@ -1175,6 +1142,12 @@ class MainWindow(QtWidgets.QMainWindow):
             for draw_mode, draw_action in self.draw_actions:
                 draw_action.setEnabled(createMode != draw_mode)
         self.actions.editMode.setEnabled(not edit)
+        self._ai_text_to_annotation_widget.setEnabled(
+            not edit and createMode == "rectangle"
+        )
+        self._ai_assisted_annotation_widget.setEnabled(
+            not edit and createMode in ("ai_polygon", "ai_mask")
+        )
 
     def updateFileMenu(self):
         current = self.filename
@@ -1209,9 +1182,6 @@ class MainWindow(QtWidgets.QMainWindow):
         return False
 
     def _edit_label(self, value=None):
-        if not self.canvas.editing():
-            return
-
         items = self.labelList.selectedItems()
         if not items:
             logger.warning("No label is selected, so cannot edit label.")
@@ -1532,10 +1502,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.actions.paste.setEnabled(len(self._copied_shapes) > 0)
 
     def _label_selection_changed(self) -> None:
-        if not self.canvas.editing():
-            logger.warning("canvas is not editing mode, cannot change label selection")
-            return
-
         selected_shapes: list[Shape] = []
         for item in self.labelList.selectedItems():
             selected_shapes.append(item.shape())

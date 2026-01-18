@@ -2,30 +2,29 @@ import json
 import time
 
 import numpy as np
-import numpy.typing as npt
 import osam
 from loguru import logger
+from numpy.typing import NDArray
+from PyQt5 import QtCore
+
+from labelme.shape import Shape
+
+from ._osam_session import OsamSession
 
 
 def get_bboxes_from_texts(
-    model: str, image: np.ndarray, texts: list[str]
+    session: OsamSession, image: np.ndarray, image_id: str, texts: list[str]
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    request: osam.types.GenerateRequest = osam.types.GenerateRequest(
-        model=model,
-        image=image,
-        prompt=osam.types.Prompt(
-            texts=texts,
-            iou_threshold=1.0,
-            score_threshold=0.01,
-            max_annotations=1000,
-        ),
-    )
     logger.debug(
-        f"Requesting with model={model!r}, image={(image.shape, image.dtype)}, "
-        f"prompt={request.prompt!r}"
+        f"Requesting with model={session.model_name!r}, "
+        f"image={(image.shape, image.dtype)}, texts={texts!r}"
     )
     t_start: float = time.time()
-    response: osam.types.GenerateResponse = osam.apis.generate(request=request)
+    response: osam.types.GenerateResponse = session.run(
+        image=image,
+        image_id=image_id,
+        texts=texts,
+    )
 
     num_annotations: int = len(response.annotations)
     logger.debug(
@@ -33,9 +32,9 @@ def get_bboxes_from_texts(
         f"elapsed_time={time.time() - t_start:.3f} [s]"
     )
 
-    boxes: npt.NDArray[np.float32] = np.empty((num_annotations, 4), dtype=np.float32)
-    scores: npt.NDArray[np.float32] = np.empty((num_annotations,), dtype=np.float32)
-    labels: npt.NDArray[np.float32] = np.empty((num_annotations,), dtype=np.int32)
+    boxes: NDArray[np.float32] = np.empty((num_annotations, 4), dtype=np.float32)
+    scores: NDArray[np.float32] = np.empty((num_annotations,), dtype=np.float32)
+    labels: NDArray[np.float32] = np.empty((num_annotations,), dtype=np.int32)
     for i, annotation in enumerate(response.annotations):
         if annotation.bounding_box is None:
             raise ValueError("Bounding box is missing in the annotation.")
@@ -63,12 +62,21 @@ def nms_bboxes(
     score_threshold: float,
     max_num_detections: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if len(boxes) == 0:
+        return boxes, scores, labels
+
     num_classes: int = max(labels) + 1
-    scores_of_all_classes: npt.NDArray[np.float32] = np.zeros(
+    scores_of_all_classes: NDArray[np.float32] = np.zeros(
         (len(boxes), num_classes), dtype=np.float32
     )
     for i, (score, label) in enumerate(zip(scores, labels)):
         scores_of_all_classes[i, label] = score
+    logger.debug(
+        "Running NMS: iou_threshold={}, score_threshold={}, max_num_detections={}",
+        iou_threshold,
+        score_threshold,
+        max_num_detections,
+    )
     logger.debug(f"Input: num_boxes={len(boxes)}")
     boxes, scores, labels = osam.apis.non_maximum_suppression(
         boxes=boxes,
@@ -83,18 +91,17 @@ def nms_bboxes(
 
 def get_shapes_from_bboxes(
     boxes: np.ndarray, scores: np.ndarray, labels: np.ndarray, texts: list[str]
-) -> list[dict]:
-    shapes: list[dict] = []
+) -> list[Shape]:
+    shapes: list[Shape] = []
     for box, score, label in zip(boxes.tolist(), scores.tolist(), labels.tolist()):
         text: str = texts[label]
+        shape = Shape(
+            label=text,
+            shape_type="rectangle",
+            description=json.dumps(dict(score=score, text=text)),
+        )
         xmin, ymin, xmax, ymax = box
-        shape: dict = {
-            "label": text,
-            "points": [[xmin, ymin], [xmax, ymax]],
-            "group_id": None,
-            "shape_type": "rectangle",
-            "flags": {},
-            "description": json.dumps(dict(score=score, text=text)),
-        }
+        shape.addPoint(QtCore.QPointF(xmin, ymin))
+        shape.addPoint(QtCore.QPointF(xmax, ymax))
         shapes.append(shape)
     return shapes
