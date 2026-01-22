@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import enum
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import imgviz
 import numpy as np
-import osam
+try:
+    import osam
+except (ImportError, OSError, RuntimeError):
+    osam = None  # type: ignore[assignment]
 from loguru import logger
+
+if TYPE_CHECKING:
+    try:
+        from osam.types import GenerateResponse
+    except ImportError:
+        GenerateResponse = None  # type: ignore[assignment, misc]
 from PyQt5 import QtCore
 from PyQt5 import QtGui
 from PyQt5 import QtWidgets
@@ -208,6 +217,10 @@ class Canvas(QtWidgets.QWidget):
         logger.debug("Setting brush size to {!r}", size)
 
     def _get_osam_session(self) -> OsamSession:
+        if osam is None:
+            raise RuntimeError(
+                "AI features are not available. onnxruntime failed to load."
+            )
         if (
             self._osam_session is None
             or self._osam_session.model_name != self._osam_session_model_name
@@ -218,8 +231,17 @@ class Canvas(QtWidgets.QWidget):
     def _update_shape_with_ai(
         self, points: list[QPointF], point_labels: list[int], shape: Shape
     ) -> None:
+        if osam is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "AI Features Unavailable",
+                "AI-assisted annotation features are not available.\n\n"
+                "onnxruntime failed to load. Please ensure Visual C++ Redistributable "
+                "is installed and onnxruntime is properly configured.",
+            )
+            return
         image: np.ndarray = labelme.utils.img_qt_to_arr(img_qt=self.pixmap.toImage())
-        response: osam.types.GenerateResponse = self._get_osam_session().run(
+        response = self._get_osam_session().run(
             image=imgviz.asrgb(image),
             image_id=str(self._pixmap_hash),
             points=np.array([[p.x(), p.y()] for p in points]),
@@ -367,16 +389,12 @@ class Canvas(QtWidgets.QWidget):
             if isNew:
                 return self.tr("Click first corner for rectangle")
             else:
-<<<<<<< HEAD
-                return self.tr("Click opposite corner for rectangle")
+                return self.tr("Click opposite corner for rectangle (Shift for square)")
         if self.createMode == "brush":
             if self._brush_image is None:
                 return self.tr("Click and drag to paint, Enter/Space to confirm")
             else:
                 return self.tr("Continue painting or Enter/Space to confirm")
-=======
-                return self.tr("Click opposite corner for rectangle (Shift for square)")
->>>>>>> origin/feature/square-rectangle
         return self.tr("Click to add point")
 
     def mouseMoveEvent(self, ev):
@@ -1621,7 +1639,7 @@ class Canvas(QtWidgets.QWidget):
 
 
 def _update_shape_with_ai_response(
-    response: osam.types.GenerateResponse,
+    response: "GenerateResponse | None",  # type: ignore[name-defined]
     shape: Shape,
     createMode: Literal["ai_polygon", "ai_mask"],
 ) -> None:

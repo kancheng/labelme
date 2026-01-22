@@ -1,10 +1,21 @@
 import json
 import time
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
-import osam
+try:
+    import osam
+except (ImportError, OSError, RuntimeError):
+    osam = None  # type: ignore[assignment]
 from loguru import logger
+
+if TYPE_CHECKING:
+    try:
+        from osam.types import GenerateResponse
+    except ImportError:
+        GenerateResponse = None  # type: ignore[assignment, misc]
+else:
+    GenerateResponse = None  # type: ignore[assignment, misc]
 from numpy.typing import NDArray
 from PyQt5 import QtCore
 
@@ -17,12 +28,16 @@ from .polygon_from_mask import compute_polygon_from_mask
 def get_bboxes_from_texts(
     session: OsamSession, image: np.ndarray, image_id: str, texts: list[str]
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+    if osam is None:
+        raise RuntimeError(
+            "AI features are not available. onnxruntime failed to load."
+        )
     logger.debug(
         f"Requesting with model={session.model_name!r}, "
         f"image={(image.shape, image.dtype)}, texts={texts!r}"
     )
     t_start: float = time.time()
-    response: osam.types.GenerateResponse = session.run(
+    response = session.run(
         image=image,
         image_id=image_id,
         texts=texts,
@@ -80,6 +95,10 @@ def nms_bboxes(
         max_num_detections,
     )
     logger.debug(f"Input: num_boxes={len(boxes)}")
+    if osam is None:
+        raise RuntimeError(
+            "AI features are not available. onnxruntime failed to load."
+        )
     boxes, scores, labels, indices = osam.apis.non_maximum_suppression(
         boxes=boxes,
         scores=scores_of_all_classes,

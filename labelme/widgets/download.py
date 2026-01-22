@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import types
 
-import osam
+try:
+    import osam
+except (ImportError, OSError, RuntimeError):
+    osam = None  # type: ignore[assignment]
 from loguru import logger
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import QObject
@@ -33,6 +36,15 @@ class _AiModelDownloadWorker(QRunnable):
 
 
 def download_ai_model(model_name: str, parent: QtWidgets.QWidget) -> bool:
+    if osam is None:
+        QtWidgets.QMessageBox.warning(
+            parent,
+            "AI Features Unavailable",
+            "AI-assisted annotation features are not available.\n\n"
+            "onnxruntime failed to load. Please ensure Visual C++ Redistributable "
+            "is installed and onnxruntime is properly configured.",
+        )
+        return False
     model_type = osam.apis.get_model_type_by_name(model_name)
 
     if _is_already_downloaded := model_type.get_size() is not None:

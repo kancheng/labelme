@@ -14,7 +14,10 @@ from typing import Literal
 import imgviz
 import natsort
 import numpy as np
-import osam
+try:
+    import osam
+except (ImportError, OSError, RuntimeError):
+    osam = None  # type: ignore[assignment]
 from loguru import logger
 from numpy.typing import NDArray
 from PyQt5 import QtCore
@@ -1095,6 +1098,16 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
         texts = self._ai_text_to_annotation_widget.get_text_prompt().split(",")
+
+        if osam is None:
+            QMessageBox.warning(
+                self,
+                "AI Features Unavailable",
+                "AI-assisted annotation features are not available.\n\n"
+                "onnxruntime failed to load. Please ensure Visual C++ Redistributable "
+                "is installed and onnxruntime is properly configured.",
+            )
+            return
 
         model_name: str = self._ai_text_to_annotation_widget.get_model_name()
         model_type = osam.apis.get_model_type_by_name(model_name)
