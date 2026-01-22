@@ -2449,29 +2449,437 @@ class MainWindow(QtWidgets.QMainWindow):
         return widget
 
     def _create_data_processing_tab(self) -> QtWidgets.QWidget:
-        """創建數據處理分頁"""
+        """創建數據處理分頁 - 包含數據增強功能"""
         widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        widget.setLayout(layout)
+        main_layout = QtWidgets.QVBoxLayout()
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+        widget.setLayout(main_layout)
 
+        # 標題
         title = QtWidgets.QLabel("數據處理 / Data Processing")
         title_font = QtGui.QFont()
         title_font.setPointSize(18)
         title_font.setBold(True)
         title.setFont(title_font)
-        layout.addWidget(title)
+        main_layout.addWidget(title)
 
-        status_label = QtWidgets.QLabel("🚧 規劃中 / In Planning")
-        status_font = QtGui.QFont()
-        status_font.setPointSize(12)
-        status_font.setItalic(True)
-        status_label.setFont(status_font)
-        status_label.setStyleSheet("color: #888888;")
-        layout.addWidget(status_label)
-
-        layout.addStretch()
+        # 主內容區域：分為左右兩部分
+        content_layout = QtWidgets.QHBoxLayout()
+        content_layout.setSpacing(10)
+        
+        # 左側：原圖顯示區域
+        left_panel = QtWidgets.QGroupBox("原始圖像 / Original Image")
+        left_layout = QtWidgets.QVBoxLayout()
+        left_layout.setContentsMargins(5, 5, 5, 5)
+        left_panel.setLayout(left_layout)
+        
+        # 原圖顯示
+        self.original_image_label = QtWidgets.QLabel()
+        self.original_image_label.setAlignment(Qt.AlignCenter)
+        self.original_image_label.setStyleSheet(
+            "QLabel { background-color: #f0f0f0; border: 1px solid #cccccc; "
+            "min-height: 400px; }"
+        )
+        self.original_image_label.setText("請選擇圖像文件")
+        self.original_image_label.setScaledContents(False)
+        original_scroll = QtWidgets.QScrollArea()
+        original_scroll.setWidget(self.original_image_label)
+        original_scroll.setWidgetResizable(True)
+        original_scroll.setMinimumHeight(400)
+        left_layout.addWidget(original_scroll)
+        
+        # 選擇圖像按鈕
+        select_image_btn = QtWidgets.QPushButton("選擇圖像")
+        select_image_btn.clicked.connect(self._select_image_for_processing)
+        left_layout.addWidget(select_image_btn)
+        
+        content_layout.addWidget(left_panel, stretch=1)
+        
+        # 中間：控制面板
+        control_panel = QtWidgets.QGroupBox("數據增強選項 / Augmentation Options")
+        control_layout = QtWidgets.QVBoxLayout()
+        control_layout.setContentsMargins(10, 10, 10, 10)
+        control_layout.setSpacing(10)
+        control_panel.setLayout(control_layout)
+        control_panel.setMaximumWidth(250)
+        control_panel.setMinimumWidth(200)
+        
+        # 初始化增強參數
+        self.augmentation_params = {
+            "rotation": 0,
+            "flip_horizontal": False,
+            "flip_vertical": False,
+            "brightness": 1.0,
+            "contrast": 1.0,
+            "saturation": 1.0,
+            "crop_x": 0,
+            "crop_y": 0,
+            "crop_width": 100,
+            "crop_height": 100,
+        }
+        
+        # 旋轉
+        rotation_label = QtWidgets.QLabel("旋轉角度 (Rotation):")
+        control_layout.addWidget(rotation_label)
+        rotation_layout = QtWidgets.QHBoxLayout()
+        self.rotation_slider = QtWidgets.QSlider(Qt.Horizontal)
+        self.rotation_slider.setMinimum(-180)
+        self.rotation_slider.setMaximum(180)
+        self.rotation_slider.setValue(0)
+        self.rotation_slider.valueChanged.connect(self._update_augmentation_preview)
+        rotation_value = QtWidgets.QLabel("0°")
+        rotation_value.setMinimumWidth(40)
+        self.rotation_slider.valueChanged.connect(
+            lambda v: rotation_value.setText(f"{v}°")
+        )
+        rotation_layout.addWidget(self.rotation_slider)
+        rotation_layout.addWidget(rotation_value)
+        control_layout.addLayout(rotation_layout)
+        
+        # 水平翻轉
+        flip_h_btn = QtWidgets.QPushButton("水平翻轉 (Flip H)")
+        flip_h_btn.setCheckable(True)
+        flip_h_btn.clicked.connect(
+            lambda checked: self._set_aug_param("flip_horizontal", checked)
+        )
+        control_layout.addWidget(flip_h_btn)
+        
+        # 垂直翻轉
+        flip_v_btn = QtWidgets.QPushButton("垂直翻轉 (Flip V)")
+        flip_v_btn.setCheckable(True)
+        flip_v_btn.clicked.connect(
+            lambda checked: self._set_aug_param("flip_vertical", checked)
+        )
+        control_layout.addWidget(flip_v_btn)
+        
+        control_layout.addWidget(QtWidgets.QLabel(""))  # 間距
+        
+        # 亮度
+        brightness_label = QtWidgets.QLabel("亮度 (Brightness):")
+        control_layout.addWidget(brightness_label)
+        brightness_layout = QtWidgets.QHBoxLayout()
+        self.brightness_slider = QtWidgets.QSlider(Qt.Horizontal)
+        self.brightness_slider.setMinimum(50)
+        self.brightness_slider.setMaximum(200)
+        self.brightness_slider.setValue(100)
+        self.brightness_slider.valueChanged.connect(self._update_augmentation_preview)
+        brightness_value = QtWidgets.QLabel("100%")
+        brightness_value.setMinimumWidth(50)
+        self.brightness_slider.valueChanged.connect(
+            lambda v: brightness_value.setText(f"{v}%")
+        )
+        brightness_layout.addWidget(self.brightness_slider)
+        brightness_layout.addWidget(brightness_value)
+        control_layout.addLayout(brightness_layout)
+        
+        # 對比度
+        contrast_label = QtWidgets.QLabel("對比度 (Contrast):")
+        control_layout.addWidget(contrast_label)
+        contrast_layout = QtWidgets.QHBoxLayout()
+        self.contrast_slider = QtWidgets.QSlider(Qt.Horizontal)
+        self.contrast_slider.setMinimum(50)
+        self.contrast_slider.setMaximum(200)
+        self.contrast_slider.setValue(100)
+        self.contrast_slider.valueChanged.connect(self._update_augmentation_preview)
+        contrast_value = QtWidgets.QLabel("100%")
+        contrast_value.setMinimumWidth(50)
+        self.contrast_slider.valueChanged.connect(
+            lambda v: contrast_value.setText(f"{v}%")
+        )
+        contrast_layout.addWidget(self.contrast_slider)
+        contrast_layout.addWidget(contrast_value)
+        control_layout.addLayout(contrast_layout)
+        
+        # 飽和度
+        saturation_label = QtWidgets.QLabel("飽和度 (Saturation):")
+        control_layout.addWidget(saturation_label)
+        saturation_layout = QtWidgets.QHBoxLayout()
+        self.saturation_slider = QtWidgets.QSlider(Qt.Horizontal)
+        self.saturation_slider.setMinimum(0)
+        self.saturation_slider.setMaximum(200)
+        self.saturation_slider.setValue(100)
+        self.saturation_slider.valueChanged.connect(self._update_augmentation_preview)
+        saturation_value = QtWidgets.QLabel("100%")
+        saturation_value.setMinimumWidth(50)
+        self.saturation_slider.valueChanged.connect(
+            lambda v: saturation_value.setText(f"{v}%")
+        )
+        saturation_layout.addWidget(self.saturation_slider)
+        saturation_layout.addWidget(saturation_value)
+        control_layout.addLayout(saturation_layout)
+        
+        control_layout.addStretch()
+        
+        # 重置按鈕
+        reset_btn = QtWidgets.QPushButton("重置 (Reset)")
+        reset_btn.clicked.connect(self._reset_augmentation)
+        control_layout.addWidget(reset_btn)
+        
+        # 應用按鈕
+        apply_btn = QtWidgets.QPushButton("應用增強結果")
+        apply_btn.setStyleSheet(
+            "QPushButton { background-color: #4caf50; color: white; "
+            "font-weight: bold; padding: 8px; }"
+            "QPushButton:hover { background-color: #45a049; }"
+        )
+        apply_btn.clicked.connect(self._apply_augmentation)
+        control_layout.addWidget(apply_btn)
+        
+        content_layout.addWidget(control_panel, stretch=0)
+        
+        # 右側：增強預覽區域
+        right_panel = QtWidgets.QGroupBox("增強預覽 / Augmented Preview")
+        right_layout = QtWidgets.QVBoxLayout()
+        right_layout.setContentsMargins(5, 5, 5, 5)
+        right_panel.setLayout(right_layout)
+        
+        # 預覽圖像顯示
+        self.augmented_image_label = QtWidgets.QLabel()
+        self.augmented_image_label.setAlignment(Qt.AlignCenter)
+        self.augmented_image_label.setStyleSheet(
+            "QLabel { background-color: #f0f0f0; border: 1px solid #cccccc; "
+            "min-height: 400px; }"
+        )
+        self.augmented_image_label.setText("預覽將顯示在這裡")
+        self.augmented_image_label.setScaledContents(False)
+        augmented_scroll = QtWidgets.QScrollArea()
+        augmented_scroll.setWidget(self.augmented_image_label)
+        augmented_scroll.setWidgetResizable(True)
+        augmented_scroll.setMinimumHeight(400)
+        right_layout.addWidget(augmented_scroll)
+        
+        # 保存按鈕
+        save_btn = QtWidgets.QPushButton("保存增強後的圖像")
+        save_btn.clicked.connect(self._save_augmented_image)
+        right_layout.addWidget(save_btn)
+        
+        content_layout.addWidget(right_panel, stretch=1)
+        
+        main_layout.addLayout(content_layout)
+        
+        # 保存原始圖像引用
+        self.original_pil_image = None
+        self.current_augmented_pil_image = None
+        
         return widget
+
+    def _select_image_for_processing(self) -> None:
+        """選擇圖像文件進行處理"""
+        filename, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "選擇圖像文件",
+            "",
+            "Image Files (*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.tif);;All Files (*)",
+        )
+        if filename:
+            try:
+                import PIL.Image
+                self.original_pil_image = PIL.Image.open(filename)
+                self.original_pil_image = self.original_pil_image.convert("RGB")
+                
+                # 顯示原圖
+                qimage = self._pil_to_qimage(self.original_pil_image)
+                pixmap = QtGui.QPixmap.fromImage(qimage)
+                # 使用固定大小顯示，保持寬高比
+                max_size = QtCore.QSize(800, 600)
+                scaled_pixmap = pixmap.scaled(
+                    max_size,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                )
+                self.original_image_label.setPixmap(scaled_pixmap)
+                self.original_image_label.setText("")
+                self.original_image_label.resize(scaled_pixmap.size())
+                
+                # 重置增強參數並更新預覽
+                self._reset_augmentation()
+            except Exception as e:
+                QMessageBox.warning(
+                    self,
+                    "錯誤",
+                    f"無法載入圖像：{str(e)}",
+                )
+
+    def _pil_to_qimage(self, pil_image) -> QtGui.QImage:
+        """將 PIL Image 轉換為 QImage"""
+        import PIL.Image
+        
+        # 確保圖像是 RGB 模式
+        if pil_image.mode != "RGB":
+            pil_image = pil_image.convert("RGB")
+        
+        # PIL Image 的數據格式是 RGB，QImage 需要 BGR，所以需要轉換
+        # 但實際上 QImage.Format_RGB888 期望的是 RGB 順序
+        img_data = pil_image.tobytes("raw", "RGB")
+        qimage = QtGui.QImage(
+            img_data,
+            pil_image.size[0],
+            pil_image.size[1],
+            pil_image.size[0] * 3,
+            QtGui.QImage.Format_RGB888,
+        )
+        return qimage
+
+    def _set_aug_param(self, param_name: str, value) -> None:
+        """設置增強參數"""
+        self.augmentation_params[param_name] = value
+        self._update_augmentation_preview()
+
+    def _update_augmentation_preview(self) -> None:
+        """更新增強預覽"""
+        if self.original_pil_image is None:
+            return
+        
+        try:
+            import PIL.Image
+            import PIL.ImageEnhance
+            import PIL.ImageOps
+            
+            # 複製原圖
+            augmented = self.original_pil_image.copy()
+            
+            # 應用旋轉
+            rotation = self.rotation_slider.value()
+            if rotation != 0:
+                augmented = augmented.rotate(rotation, expand=True, fillcolor=(255, 255, 255))
+            
+            # 應用翻轉
+            if self.augmentation_params["flip_horizontal"]:
+                augmented = PIL.ImageOps.mirror(augmented)
+            if self.augmentation_params["flip_vertical"]:
+                augmented = PIL.ImageOps.flip(augmented)
+            
+            # 應用亮度
+            brightness_factor = self.brightness_slider.value() / 100.0
+            if brightness_factor != 1.0:
+                enhancer = PIL.ImageEnhance.Brightness(augmented)
+                augmented = enhancer.enhance(brightness_factor)
+            
+            # 應用對比度
+            contrast_factor = self.contrast_slider.value() / 100.0
+            if contrast_factor != 1.0:
+                enhancer = PIL.ImageEnhance.Contrast(augmented)
+                augmented = enhancer.enhance(contrast_factor)
+            
+            # 應用飽和度
+            saturation_factor = self.saturation_slider.value() / 100.0
+            if saturation_factor != 1.0:
+                enhancer = PIL.ImageEnhance.Color(augmented)
+                augmented = enhancer.enhance(saturation_factor)
+            
+            # 保存當前增強後的圖像
+            self.current_augmented_pil_image = augmented
+            
+            # 顯示預覽
+            qimage = self._pil_to_qimage(augmented)
+            pixmap = QtGui.QPixmap.fromImage(qimage)
+            # 使用固定大小顯示，保持寬高比
+            max_size = QtCore.QSize(800, 600)
+            scaled_pixmap = pixmap.scaled(
+                max_size,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+            self.augmented_image_label.setPixmap(scaled_pixmap)
+            self.augmented_image_label.setText("")
+            self.augmented_image_label.resize(scaled_pixmap.size())
+            
+        except Exception as e:
+            logger.error(f"更新預覽時出錯: {e}")
+            QMessageBox.warning(
+                self,
+                "錯誤",
+                f"更新預覽時出錯：{str(e)}",
+            )
+
+    def _reset_augmentation(self) -> None:
+        """重置所有增強參數"""
+        self.rotation_slider.setValue(0)
+        self.brightness_slider.setValue(100)
+        self.contrast_slider.setValue(100)
+        self.saturation_slider.setValue(100)
+        
+        # 重置翻轉按鈕
+        for widget in self.findChildren(QtWidgets.QPushButton):
+            if widget.text() in ["水平翻轉 (Flip H)", "垂直翻轉 (Flip V)"]:
+                widget.setChecked(False)
+        
+        self.augmentation_params = {
+            "rotation": 0,
+            "flip_horizontal": False,
+            "flip_vertical": False,
+            "brightness": 1.0,
+            "contrast": 1.0,
+            "saturation": 1.0,
+        }
+        
+        self._update_augmentation_preview()
+
+    def _apply_augmentation(self) -> None:
+        """應用增強結果 - 將增強後的圖像設為原圖"""
+        if self.current_augmented_pil_image is None:
+            QMessageBox.warning(
+                self,
+                "警告",
+                "請先選擇圖像並進行增強處理。",
+            )
+            return
+        
+        # 將增強後的圖像設為原圖
+        self.original_pil_image = self.current_augmented_pil_image.copy()
+        
+        # 更新原圖顯示
+        qimage = self._pil_to_qimage(self.original_pil_image)
+        pixmap = QtGui.QPixmap.fromImage(qimage)
+        max_size = QtCore.QSize(800, 600)
+        scaled_pixmap = pixmap.scaled(
+            max_size,
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation,
+        )
+        self.original_image_label.setPixmap(scaled_pixmap)
+        self.original_image_label.resize(scaled_pixmap.size())
+        
+        # 重置增強參數
+        self._reset_augmentation()
+        
+        QMessageBox.information(
+            self,
+            "成功",
+            "已應用增強結果。增強後的圖像已設為新的原圖。",
+        )
+
+    def _save_augmented_image(self) -> None:
+        """保存增強後的圖像"""
+        if self.current_augmented_pil_image is None:
+            QMessageBox.warning(
+                self,
+                "警告",
+                "沒有可保存的增強圖像。請先選擇圖像並進行增強處理。",
+            )
+            return
+        
+        filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "保存增強後的圖像",
+            "",
+            "PNG Files (*.png);;JPEG Files (*.jpg *.jpeg);;All Files (*)",
+        )
+        if filename:
+            try:
+                self.current_augmented_pil_image.save(filename)
+                QMessageBox.information(
+                    self,
+                    "成功",
+                    f"圖像已保存至：{filename}",
+                )
+            except Exception as e:
+                QMessageBox.warning(
+                    self,
+                    "錯誤",
+                    f"保存圖像時出錯：{str(e)}",
+                )
 
     def _create_data_conversion_tab(self) -> QtWidgets.QWidget:
         """創建數據格式轉換分頁"""
