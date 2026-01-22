@@ -5,16 +5,17 @@ from typing import TYPE_CHECKING, Literal
 
 import imgviz
 import numpy as np
+from loguru import logger
+
 try:
     import osam
 except (ImportError, OSError, RuntimeError):
     osam = None  # type: ignore[assignment]
-from loguru import logger
 
 if TYPE_CHECKING:
-    try:
+    if osam is not None:
         from osam.types import GenerateResponse
-    except ImportError:
+    else:
         GenerateResponse = None  # type: ignore[assignment, misc]
 from PyQt5 import QtCore
 from PyQt5 import QtGui
@@ -241,7 +242,7 @@ class Canvas(QtWidgets.QWidget):
             )
             return
         image: np.ndarray = labelme.utils.img_qt_to_arr(img_qt=self.pixmap.toImage())
-        response = self._get_osam_session().run(
+        response: "GenerateResponse" = self._get_osam_session().run(  # type: ignore[name-defined]
             image=imgviz.asrgb(image),
             image_id=str(self._pixmap_hash),
             points=np.array([[p.x(), p.y()] for p in points]),

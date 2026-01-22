@@ -3,21 +3,20 @@ import time
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
+from loguru import logger
+from numpy.typing import NDArray
+from PyQt5 import QtCore
+
 try:
     import osam
 except (ImportError, OSError, RuntimeError):
     osam = None  # type: ignore[assignment]
-from loguru import logger
 
 if TYPE_CHECKING:
-    try:
+    if osam is not None:
         from osam.types import GenerateResponse
-    except ImportError:
+    else:
         GenerateResponse = None  # type: ignore[assignment, misc]
-else:
-    GenerateResponse = None  # type: ignore[assignment, misc]
-from numpy.typing import NDArray
-from PyQt5 import QtCore
 
 from labelme.shape import Shape
 
@@ -28,16 +27,12 @@ from .polygon_from_mask import compute_polygon_from_mask
 def get_bboxes_from_texts(
     session: OsamSession, image: np.ndarray, image_id: str, texts: list[str]
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
-    if osam is None:
-        raise RuntimeError(
-            "AI features are not available. onnxruntime failed to load."
-        )
     logger.debug(
         f"Requesting with model={session.model_name!r}, "
         f"image={(image.shape, image.dtype)}, texts={texts!r}"
     )
     t_start: float = time.time()
-    response = session.run(
+    response: "GenerateResponse" = session.run(  # type: ignore[name-defined]
         image=image,
         image_id=image_id,
         texts=texts,
@@ -97,7 +92,7 @@ def nms_bboxes(
     logger.debug(f"Input: num_boxes={len(boxes)}")
     if osam is None:
         raise RuntimeError(
-            "AI features are not available. onnxruntime failed to load."
+            "osam is not available. Please ensure onnxruntime is properly installed."
         )
     boxes, scores, labels, indices = osam.apis.non_maximum_suppression(
         boxes=boxes,

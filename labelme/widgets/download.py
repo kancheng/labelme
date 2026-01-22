@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import types
 
+from loguru import logger
+
 try:
     import osam
 except (ImportError, OSError, RuntimeError):
     osam = None  # type: ignore[assignment]
-from loguru import logger
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import QObject
 from PyQt5.QtCore import QRunnable
@@ -40,7 +41,7 @@ def download_ai_model(model_name: str, parent: QtWidgets.QWidget) -> bool:
         QtWidgets.QMessageBox.warning(
             parent,
             "AI Features Unavailable",
-            "AI-assisted annotation features are not available.\n\n"
+            "AI model download is not available.\n\n"
             "onnxruntime failed to load. Please ensure Visual C++ Redistributable "
             "is installed and onnxruntime is properly configured.",
         )

@@ -27,6 +27,7 @@ except (ImportError, OSError, RuntimeError) as e:
         ImportWarning,
         stacklevel=2,
     )
+    onnxruntime = None  # type: ignore[assignment]
 
 from labelme import testing
 from labelme import utils

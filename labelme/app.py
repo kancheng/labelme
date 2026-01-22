@@ -142,6 +142,9 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle(__appname__)
 
+        # Initialize settings early so it's available for tab creation
+        self.settings = QtCore.QSettings("labelme", "labelme")
+
         self._copied_shapes = []
 
         # Main widgets and related state.
@@ -231,7 +234,42 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.selectionChanged.connect(self.shapeSelectionChanged)
         self.canvas.drawingPolygon.connect(self.toggleDrawingSensitive)
 
-        self.setCentralWidget(scrollArea)
+        # 創建分頁控件
+        self.tab_widget = QtWidgets.QTabWidget()
+        self.tab_widget.setTabPosition(QtWidgets.QTabWidget.North)
+        
+        # 分頁 1: 環境設定
+        env_tab = self._create_environment_setup_tab()
+        self.tab_widget.addTab(env_tab, "1. 環境設定")
+        
+        # 分頁 2: 數據處理
+        data_processing_tab = self._create_data_processing_tab()
+        self.tab_widget.addTab(data_processing_tab, "2. 數據處理")
+        
+        # 分頁 3: 數據標註 (Labelme 原有功能)
+        annotation_tab = QtWidgets.QWidget()
+        annotation_layout = QtWidgets.QVBoxLayout()
+        annotation_layout.setContentsMargins(0, 0, 0, 0)
+        annotation_layout.addWidget(scrollArea)
+        annotation_tab.setLayout(annotation_layout)
+        self.tab_widget.addTab(annotation_tab, "3. 數據標註")
+        
+        # 分頁 4: 數據格式轉換
+        conversion_tab = self._create_data_conversion_tab()
+        self.tab_widget.addTab(conversion_tab, "4. 數據格式轉換")
+        
+        # 分頁 5: 模型訓練
+        training_tab = self._create_model_training_tab()
+        self.tab_widget.addTab(training_tab, "5. 模型訓練")
+        
+        # 分頁 6: 模型匯出
+        export_tab = self._create_model_export_tab()
+        self.tab_widget.addTab(export_tab, "6. 模型匯出")
+        
+        # 默認顯示第三個分頁（數據標註）
+        self.tab_widget.setCurrentIndex(2)
+        
+        self.setCentralWidget(self.tab_widget)
 
         features = QtWidgets.QDockWidget.DockWidgetFeatures()
         for dock in ["flag_dock", "label_dock", "shape_dock", "file_dock"]:
@@ -976,7 +1014,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # XXX: Could be completely declarative.
         # Restore application settings.
-        self.settings = QtCore.QSettings("labelme", "labelme")
+        # Note: self.settings is already initialized earlier in __init__
         self.recentFiles = self.settings.value("recentFiles", []) or []
         size = self.settings.value("window/size", QtCore.QSize(900, 500))
         position = self.settings.value("window/position", QtCore.QPoint(0, 0))
@@ -1087,6 +1125,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._brushSizeLabel.setText(str(value))
 
     def _submit_ai_prompt(self, _) -> None:
+        if osam is None:
+            QMessageBox.warning(
+                self,
+                "AI Features Unavailable",
+                "AI-assisted annotation features are not available.\n\n"
+                "onnxruntime failed to load. Please ensure Visual C++ Redistributable "
+                "is installed and onnxruntime is properly configured.",
+            )
+            return
+
         if (
             self.canvas.createMode
             not in _AI_TEXT_TO_ANNOTATION_CREATE_MODE_TO_SHAPE_TYPE
@@ -2319,6 +2367,576 @@ class MainWindow(QtWidgets.QMainWindow):
         stats.append(f"mode={self.canvas.mode.name}")
         stats.append(f"x={mouse_pos.x():6.1f}, y={mouse_pos.y():6.1f}")
         self.status_right.setText(" | ".join(stats))
+
+    def _create_environment_setup_tab(self) -> QtWidgets.QWidget:
+        """創建環境設定分頁 - 包含 Python 環境檢測功能"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        widget.setLayout(layout)
+
+        # 標題
+        title = QtWidgets.QLabel("環境設定 / Environment Setup")
+        title_font = QtGui.QFont()
+        title_font.setPointSize(18)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        layout.addWidget(title)
+
+        # Python 環境檢測區域
+        python_group = QtWidgets.QGroupBox("Python 環境檢測")
+        python_layout = QtWidgets.QVBoxLayout()
+        python_layout.setSpacing(10)
+        python_group.setLayout(python_layout)
+
+        # 檢測按鈕
+        detect_button = QtWidgets.QPushButton("開始檢測 Python 環境")
+        detect_button.setMinimumHeight(40)
+        detect_button.clicked.connect(self._detect_python_environments)
+        python_layout.addWidget(detect_button)
+        
+        # 顯示已保存的訓練環境（如果存在）
+        saved_env_path = self.settings.value("training/python_path", "")
+        saved_env_name = self.settings.value("training/env_name", "")
+        if saved_env_path:
+            saved_env_frame = QtWidgets.QFrame()
+            saved_env_frame.setFrameStyle(QtWidgets.QFrame.Box)
+            saved_env_frame.setStyleSheet(
+                "QFrame { background-color: #e8f5e9; border: 2px solid #4caf50; "
+                "border-radius: 5px; padding: 10px; margin-top: 10px; }"
+            )
+            saved_env_layout = QtWidgets.QVBoxLayout()
+            saved_env_layout.setSpacing(5)
+            saved_env_frame.setLayout(saved_env_layout)
+            
+            saved_title = QtWidgets.QLabel("💾 已保存的訓練環境")
+            saved_title_font = QtGui.QFont()
+            saved_title_font.setPointSize(11)
+            saved_title_font.setBold(True)
+            saved_title.setFont(saved_title_font)
+            saved_title.setStyleSheet("color: #4caf50;")
+            saved_env_layout.addWidget(saved_title)
+            
+            saved_name_label = QtWidgets.QLabel(f"環境名稱: {saved_env_name}")
+            saved_name_label.setStyleSheet("color: #333333; font-size: 10px;")
+            saved_env_layout.addWidget(saved_name_label)
+            
+            saved_path_label = QtWidgets.QLabel(f"Python 路徑: {saved_env_path}")
+            saved_path_label.setStyleSheet("color: #666666; font-family: monospace; font-size: 9px;")
+            saved_path_label.setWordWrap(True)
+            saved_env_layout.addWidget(saved_path_label)
+            
+            python_layout.addWidget(saved_env_frame)
+
+        # 結果顯示區域
+        result_scroll = QtWidgets.QScrollArea()
+        result_scroll.setWidgetResizable(True)
+        result_widget = QtWidgets.QWidget()
+        env_result_layout = QtWidgets.QVBoxLayout()
+        env_result_layout.setSpacing(10)
+        result_widget.setLayout(env_result_layout)
+        result_scroll.setWidget(result_widget)
+        result_scroll.setMinimumHeight(400)
+        python_layout.addWidget(result_scroll)
+
+        # 保存 layout 引用以便後續使用
+        self.env_result_layout = env_result_layout
+
+        layout.addWidget(python_group)
+        layout.addStretch()
+
+        return widget
+
+    def _create_data_processing_tab(self) -> QtWidgets.QWidget:
+        """創建數據處理分頁"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        widget.setLayout(layout)
+
+        title = QtWidgets.QLabel("數據處理 / Data Processing")
+        title_font = QtGui.QFont()
+        title_font.setPointSize(18)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        layout.addWidget(title)
+
+        status_label = QtWidgets.QLabel("🚧 規劃中 / In Planning")
+        status_font = QtGui.QFont()
+        status_font.setPointSize(12)
+        status_font.setItalic(True)
+        status_label.setFont(status_font)
+        status_label.setStyleSheet("color: #888888;")
+        layout.addWidget(status_label)
+
+        layout.addStretch()
+        return widget
+
+    def _create_data_conversion_tab(self) -> QtWidgets.QWidget:
+        """創建數據格式轉換分頁"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        widget.setLayout(layout)
+
+        title = QtWidgets.QLabel("數據格式轉換 / Data Format Conversion")
+        title_font = QtGui.QFont()
+        title_font.setPointSize(18)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        layout.addWidget(title)
+
+        status_label = QtWidgets.QLabel("🚧 規劃中 / In Planning")
+        status_font = QtGui.QFont()
+        status_font.setPointSize(12)
+        status_font.setItalic(True)
+        status_label.setFont(status_font)
+        status_label.setStyleSheet("color: #888888;")
+        layout.addWidget(status_label)
+
+        layout.addStretch()
+        return widget
+
+    def _create_model_training_tab(self) -> QtWidgets.QWidget:
+        """創建模型訓練分頁"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        widget.setLayout(layout)
+
+        title = QtWidgets.QLabel("模型訓練 / Model Training")
+        title_font = QtGui.QFont()
+        title_font.setPointSize(18)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        layout.addWidget(title)
+
+        # Python 環境信息區域
+        env_info_group = QtWidgets.QGroupBox("訓練環境設定")
+        env_info_layout = QtWidgets.QVBoxLayout()
+        env_info_layout.setSpacing(10)
+        env_info_group.setLayout(env_info_layout)
+
+        # 顯示當前選中的 Python 環境
+        saved_env_path = self.settings.value("training/python_path", "")
+        saved_env_name = self.settings.value("training/env_name", "")
+        
+        if saved_env_path:
+            env_status_label = QtWidgets.QLabel("✅ 已設定訓練環境")
+            env_status_label.setStyleSheet("color: #4caf50; font-weight: bold; font-size: 12px;")
+            env_info_layout.addWidget(env_status_label)
+            
+            env_name_label = QtWidgets.QLabel(f"環境名稱: {saved_env_name}")
+            env_name_label.setStyleSheet("color: #333333; font-size: 11px;")
+            env_info_layout.addWidget(env_name_label)
+            
+            env_path_label = QtWidgets.QLabel(f"Python 路徑: {saved_env_path}")
+            env_path_label.setStyleSheet("color: #666666; font-family: monospace; font-size: 10px;")
+            env_path_label.setWordWrap(True)
+            env_info_layout.addWidget(env_path_label)
+            
+            change_button = QtWidgets.QPushButton("前往環境設定頁面更改")
+            change_button.clicked.connect(lambda: self.tab_widget.setCurrentIndex(0))
+            env_info_layout.addWidget(change_button)
+        else:
+            no_env_label = QtWidgets.QLabel("⚠️ 尚未設定訓練環境")
+            no_env_label.setStyleSheet("color: #ff9800; font-weight: bold; font-size: 12px;")
+            env_info_layout.addWidget(no_env_label)
+            
+            hint_label = QtWidgets.QLabel(
+                "請前往「1. 環境設定」分頁檢測並選擇一個 Python 環境。"
+            )
+            hint_label.setStyleSheet("color: #666666; font-size: 11px;")
+            hint_label.setWordWrap(True)
+            env_info_layout.addWidget(hint_label)
+            
+            go_button = QtWidgets.QPushButton("前往環境設定")
+            go_button.setStyleSheet(
+                "QPushButton { background-color: #2196F3; color: white; "
+                "border: none; padding: 8px 20px; border-radius: 4px; font-weight: bold; }"
+                "QPushButton:hover { background-color: #1976D2; }"
+            )
+            go_button.clicked.connect(lambda: self.tab_widget.setCurrentIndex(0))
+            env_info_layout.addWidget(go_button)
+
+        layout.addWidget(env_info_group)
+
+        status_label = QtWidgets.QLabel("🚧 模型訓練功能規劃中 / Model Training In Planning")
+        status_font = QtGui.QFont()
+        status_font.setPointSize(12)
+        status_font.setItalic(True)
+        status_label.setFont(status_font)
+        status_label.setStyleSheet("color: #888888;")
+        layout.addWidget(status_label)
+
+        layout.addStretch()
+        return widget
+
+    def _create_model_export_tab(self) -> QtWidgets.QWidget:
+        """創建模型匯出分頁"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        widget.setLayout(layout)
+
+        title = QtWidgets.QLabel("模型匯出 / Model Export")
+        title_font = QtGui.QFont()
+        title_font.setPointSize(18)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        layout.addWidget(title)
+
+        status_label = QtWidgets.QLabel("🚧 規劃中 / In Planning")
+        status_font = QtGui.QFont()
+        status_font.setPointSize(12)
+        status_font.setItalic(True)
+        status_label.setFont(status_font)
+        status_label.setStyleSheet("color: #888888;")
+        layout.addWidget(status_label)
+
+        layout.addStretch()
+        return widget
+
+    def _detect_python_environments(self) -> None:
+        """檢測系統中的 Python 環境和 YOLO 套件"""
+        # 清除之前的結果
+        while self.env_result_layout.count():
+            child = self.env_result_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # 顯示檢測中訊息
+        detecting_label = QtWidgets.QLabel("🔍 正在檢測 Python 環境...")
+        detecting_label.setStyleSheet("color: #0066cc; font-weight: bold;")
+        self.env_result_layout.addWidget(detecting_label)
+
+        # 使用 QTimer 來異步執行檢測，避免阻塞 UI
+        QtCore.QTimer.singleShot(100, lambda: self._perform_python_detection())
+
+    def _perform_python_detection(self) -> None:
+        """執行 Python 環境檢測"""
+        import subprocess
+        import sys
+        import shutil
+        from pathlib import Path
+
+        # 清除檢測中訊息
+        if self.env_result_layout.count() > 0:
+            item = self.env_result_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        found_environments = []
+
+        # 1. 檢測當前 Python 環境
+        current_python = sys.executable
+        current_version = sys.version.split()[0]
+        env_info = self._check_python_environment(current_python, "當前環境")
+        if env_info:
+            found_environments.append(env_info)
+
+        # 2. 檢測 PATH 中的 python 命令
+        python_commands = ["python", "python3", "py"]
+        for cmd in python_commands:
+            python_path = shutil.which(cmd)
+            if python_path and python_path != current_python:
+                env_info = self._check_python_environment(python_path, f"PATH: {cmd}")
+                if env_info:
+                    found_environments.append(env_info)
+
+        # 3. 檢測常見的 Python 安裝位置 (Windows)
+        if os.name == "nt":
+            common_paths = [
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Python",
+                Path(os.environ.get("PROGRAMFILES", "")) / "Python*",
+                Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Python*",
+                Path.home() / "AppData" / "Local" / "Programs" / "Python",
+            ]
+            for base_path in common_paths:
+                if base_path.exists():
+                    for python_dir in base_path.glob("Python*"):
+                        python_exe = python_dir / "python.exe"
+                        if python_exe.exists():
+                            env_info = self._check_python_environment(
+                                str(python_exe), f"安裝目錄: {python_dir.name}"
+                            )
+                            if env_info:
+                                found_environments.append(env_info)
+
+        # 4. 檢測 conda 環境
+        conda_path = shutil.which("conda")
+        if conda_path:
+            try:
+                # 在 Windows 上使用 CREATE_NO_WINDOW 避免打開窗口
+                creationflags = 0
+                if os.name == "nt":
+                    creationflags = subprocess.CREATE_NO_WINDOW
+                result = subprocess.run(
+                    ["conda", "env", "list"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    creationflags=creationflags,
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.split("\n"):
+                        if line.strip() and not line.startswith("#"):
+                            parts = line.split()
+                            if len(parts) >= 2:
+                                env_name = parts[0]
+                                env_path = parts[1]
+                                if os.path.exists(env_path):
+                                    if os.name == "nt":
+                                        python_exe = os.path.join(env_path, "python.exe")
+                                    else:
+                                        python_exe = os.path.join(env_path, "bin", "python")
+                                    if os.path.exists(python_exe):
+                                        env_info = self._check_python_environment(
+                                            python_exe, f"Conda: {env_name}"
+                                        )
+                                        if env_info:
+                                            found_environments.append(env_info)
+            except Exception as e:
+                logger.debug(f"檢測 conda 環境時出錯: {e}")
+
+        # 5. 檢測虛擬環境 (venv, virtualenv)
+        venv_paths = [
+            Path.home() / ".virtualenvs",
+            Path.home() / "venv",
+            Path.home() / ".venv",
+        ]
+        for venv_base in venv_paths:
+            if venv_base.exists():
+                for venv_dir in venv_base.iterdir():
+                    if venv_dir.is_dir():
+                        if os.name == "nt":
+                            python_exe = venv_dir / "Scripts" / "python.exe"
+                        else:
+                            python_exe = venv_dir / "bin" / "python"
+                        if python_exe.exists():
+                            env_info = self._check_python_environment(
+                                str(python_exe), f"虛擬環境: {venv_dir.name}"
+                            )
+                            if env_info:
+                                found_environments.append(env_info)
+
+        # 顯示結果
+        if not found_environments:
+            no_env_label = QtWidgets.QLabel("❌ 未找到任何 Python 環境")
+            no_env_label.setStyleSheet("color: #cc0000; font-weight: bold;")
+            self.env_result_layout.addWidget(no_env_label)
+        else:
+            summary_label = QtWidgets.QLabel(
+                f"✅ 找到 {len(found_environments)} 個 Python 環境"
+            )
+            summary_label.setStyleSheet("color: #00aa00; font-weight: bold; font-size: 14px;")
+            self.env_result_layout.addWidget(summary_label)
+            self.env_result_layout.addWidget(QtWidgets.QLabel(""))  # 間距
+
+            for env_info in found_environments:
+                self._display_environment_info(env_info)
+
+    def _check_python_environment(
+        self, python_path: str, env_name: str
+    ) -> dict | None:
+        """檢查單個 Python 環境"""
+        import subprocess
+        import json
+
+        try:
+            # 在 Windows 上使用 CREATE_NO_WINDOW 避免打開窗口
+            creationflags = 0
+            if os.name == "nt":
+                creationflags = subprocess.CREATE_NO_WINDOW
+            # 獲取 Python 版本
+            result = subprocess.run(
+                [python_path, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                creationflags=creationflags,
+            )
+            if result.returncode != 0:
+                return None
+
+            version = result.stdout.strip()
+
+            # 檢查 YOLO 相關套件
+            yolo_packages = {
+                "ultralytics": "YOLOv8/YOLOv5 (ultralytics)",
+                "yolov5": "YOLOv5 (舊版)",
+                "yolov8": "YOLOv8 (舊版)",
+                "torch": "PyTorch",
+                "torchvision": "TorchVision",
+            }
+
+            installed_packages = {}
+            for package, display_name in yolo_packages.items():
+                # 在 Windows 上使用 CREATE_NO_WINDOW 避免打開窗口
+                creationflags = 0
+                if os.name == "nt":
+                    creationflags = subprocess.CREATE_NO_WINDOW
+                result = subprocess.run(
+                    [python_path, "-m", "pip", "show", package],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    creationflags=creationflags,
+                )
+                if result.returncode == 0:
+                    # 解析版本信息
+                    for line in result.stdout.split("\n"):
+                        if line.startswith("Version:"):
+                            pkg_version = line.split(":", 1)[1].strip()
+                            installed_packages[package] = {
+                                "name": display_name,
+                                "version": pkg_version,
+                            }
+                            break
+
+            return {
+                "name": env_name,
+                "path": python_path,
+                "version": version,
+                "packages": installed_packages,
+            }
+        except Exception as e:
+            logger.debug(f"檢查 Python 環境 {python_path} 時出錯: {e}")
+            return None
+
+    def _display_environment_info(self, env_info: dict) -> None:
+        """顯示環境信息"""
+        # 檢查是否為當前選中的訓練環境
+        saved_env_path = self.settings.value("training/python_path", "")
+        is_selected = saved_env_path == env_info["path"]
+        
+        # 環境卡片
+        env_frame = QtWidgets.QFrame()
+        if is_selected:
+            env_frame.setFrameStyle(QtWidgets.QFrame.Box)
+            env_frame.setStyleSheet(
+                "QFrame { background-color: #e8f5e9; border: 2px solid #4caf50; border-radius: 5px; padding: 10px; }"
+            )
+        else:
+            env_frame.setFrameStyle(QtWidgets.QFrame.Box)
+            env_frame.setStyleSheet(
+                "QFrame { background-color: #f5f5f5; border: 1px solid #cccccc; border-radius: 5px; padding: 10px; }"
+            )
+        env_layout = QtWidgets.QVBoxLayout()
+        env_layout.setSpacing(8)
+        env_frame.setLayout(env_layout)
+
+        # 頂部：環境名稱和選中標記
+        top_layout = QtWidgets.QHBoxLayout()
+        
+        name_label = QtWidgets.QLabel(f"📦 {env_info['name']}")
+        name_font = QtGui.QFont()
+        name_font.setPointSize(12)
+        name_font.setBold(True)
+        name_label.setFont(name_font)
+        top_layout.addWidget(name_label)
+        
+        top_layout.addStretch()
+        
+        # 選中標記
+        if is_selected:
+            selected_label = QtWidgets.QLabel("✅ 已選為訓練環境")
+            selected_label.setStyleSheet("color: #4caf50; font-weight: bold; font-size: 11px;")
+            top_layout.addWidget(selected_label)
+        
+        env_layout.addLayout(top_layout)
+
+        # Python 版本
+        version_label = QtWidgets.QLabel(f"Python: {env_info['version']}")
+        version_label.setStyleSheet("color: #666666;")
+        env_layout.addWidget(version_label)
+
+        # 路徑
+        path_label = QtWidgets.QLabel(f"路徑: {env_info['path']}")
+        path_label.setStyleSheet("color: #666666; font-family: monospace; font-size: 10px;")
+        path_label.setWordWrap(True)
+        env_layout.addWidget(path_label)
+
+        # YOLO 套件檢測結果
+        if env_info["packages"]:
+            packages_label = QtWidgets.QLabel("✅ 已安裝的 YOLO 相關套件:")
+            packages_label.setStyleSheet("color: #00aa00; font-weight: bold; margin-top: 5px;")
+            env_layout.addWidget(packages_label)
+
+            for package, info in env_info["packages"].items():
+                pkg_label = QtWidgets.QLabel(
+                    f"  • {info['name']}: {info['version']}"
+                )
+                pkg_label.setStyleSheet("color: #0066cc; margin-left: 15px;")
+                env_layout.addWidget(pkg_label)
+        else:
+            no_yolo_label = QtWidgets.QLabel("❌ 未安裝 YOLO 相關套件")
+            no_yolo_label.setStyleSheet("color: #cc0000; margin-top: 5px;")
+            env_layout.addWidget(no_yolo_label)
+
+        # 操作按鈕
+        button_layout = QtWidgets.QHBoxLayout()
+        button_layout.addStretch()
+        
+        if not is_selected:
+            select_button = QtWidgets.QPushButton("設為訓練環境")
+            select_button.setStyleSheet(
+                "QPushButton { background-color: #4caf50; color: white; "
+                "border: none; padding: 6px 15px; border-radius: 3px; font-weight: bold; }"
+                "QPushButton:hover { background-color: #45a049; }"
+            )
+            select_button.clicked.connect(
+                lambda checked, path=env_info["path"], name=env_info["name"]: 
+                self._save_training_environment(path, name)
+            )
+            button_layout.addWidget(select_button)
+        else:
+            clear_button = QtWidgets.QPushButton("取消選擇")
+            clear_button.setStyleSheet(
+                "QPushButton { background-color: #f44336; color: white; "
+                "border: none; padding: 6px 15px; border-radius: 3px; font-weight: bold; }"
+                "QPushButton:hover { background-color: #da190b; }"
+            )
+            clear_button.clicked.connect(self._clear_training_environment)
+            button_layout.addWidget(clear_button)
+        
+        env_layout.addLayout(button_layout)
+        self.env_result_layout.addWidget(env_frame)
+
+    def _save_training_environment(self, python_path: str, env_name: str) -> None:
+        """保存選中的 Python 環境供模型訓練使用"""
+        self.settings.setValue("training/python_path", python_path)
+        self.settings.setValue("training/env_name", env_name)
+        self.settings.sync()
+        
+        QMessageBox.information(
+            self,
+            "環境已保存",
+            f"已將以下 Python 環境設為訓練環境：\n\n"
+            f"名稱: {env_name}\n"
+            f"路徑: {python_path}\n\n"
+            f"此環境將在模型訓練時使用。",
+        )
+        
+        # 重新顯示環境列表以更新選中狀態
+        self._detect_python_environments()
+
+    def _clear_training_environment(self) -> None:
+        """清除已選中的訓練環境"""
+        self.settings.remove("training/python_path")
+        self.settings.remove("training/env_name")
+        self.settings.sync()
+        
+        QMessageBox.information(
+            self,
+            "已清除",
+            "已清除訓練環境設定。",
+        )
+        
+        # 重新顯示環境列表以更新選中狀態
+        self._detect_python_environments()
 
 
 def _scan_image_files(root_dir: str) -> list[str]:
