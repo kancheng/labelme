@@ -1939,6 +1939,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.setFocus()
         self.show_status_message(self.tr("Loaded %s") % osp.basename(filename))
         logger.debug("loaded file: {!r}", filename)
+        
+        # 同步更新到數據處理分頁
+        self._sync_image_to_processing_tab(filename)
+        
         return True
 
     def resizeEvent(self, event):
@@ -2661,6 +2665,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # 保存原始圖像引用
         self.original_pil_image = None
         self.current_augmented_pil_image = None
+        self.original_image_path = None  # 保存原始圖像路徑，用於同步
         
         return widget
 
@@ -2677,6 +2682,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 import PIL.Image
                 self.original_pil_image = PIL.Image.open(filename)
                 self.original_pil_image = self.original_pil_image.convert("RGB")
+                self.original_image_path = filename  # 保存原始路徑
                 
                 # 顯示原圖
                 qimage = self._pil_to_qimage(self.original_pil_image)
@@ -2694,6 +2700,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 
                 # 重置增強參數並更新預覽
                 self._reset_augmentation()
+                
+                # 注意：選擇圖像時不自動同步到標註分頁
+                # 只有在保存或應用增強結果時才同步
             except Exception as e:
                 QMessageBox.warning(
                     self,
@@ -2841,17 +2850,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.original_image_label.setPixmap(scaled_pixmap)
         self.original_image_label.resize(scaled_pixmap.size())
         
+        # 同步更新到數據標註分頁
+        self._sync_pil_image_to_annotation_tab(self.original_pil_image)
+        
         # 重置增強參數
         self._reset_augmentation()
         
         QMessageBox.information(
             self,
             "成功",
-            "已應用增強結果。增強後的圖像已設為新的原圖。",
+            "已應用增強結果。增強後的圖像已設為新的原圖，並已同步更新到數據標註分頁。",
         )
 
     def _save_augmented_image(self) -> None:
-        """保存增強後的圖像"""
+        """保存增強後的圖像，並同步更新到數據標註分頁"""
         if self.current_augmented_pil_image is None:
             QMessageBox.warning(
                 self,
@@ -2869,10 +2881,30 @@ class MainWindow(QtWidgets.QMainWindow):
         if filename:
             try:
                 self.current_augmented_pil_image.save(filename)
+                
+                # 同步更新到數據標註分頁
+                self._sync_image_to_annotation_tab(filename)
+                
+                # 更新原始圖像路徑和圖像
+                self.original_image_path = filename
+                self.original_pil_image = self.current_augmented_pil_image.copy()
+                
+                # 更新原圖顯示
+                qimage = self._pil_to_qimage(self.original_pil_image)
+                pixmap = QtGui.QPixmap.fromImage(qimage)
+                max_size = QtCore.QSize(800, 600)
+                scaled_pixmap = pixmap.scaled(
+                    max_size,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                )
+                self.original_image_label.setPixmap(scaled_pixmap)
+                self.original_image_label.resize(scaled_pixmap.size())
+                
                 QMessageBox.information(
                     self,
                     "成功",
-                    f"圖像已保存至：{filename}",
+                    f"圖像已保存至：{filename}\n已同步更新到數據標註分頁。",
                 )
             except Exception as e:
                 QMessageBox.warning(
@@ -2880,6 +2912,119 @@ class MainWindow(QtWidgets.QMainWindow):
                     "錯誤",
                     f"保存圖像時出錯：{str(e)}",
                 )
+
+    def _sync_image_to_annotation_tab(self, filename: str) -> None:
+        """將圖像文件同步載入到數據標註分頁（不切換分頁）"""
+        try:
+            # 使用現有的 _load_file 方法載入圖像
+            # 注意：不自動切換分頁，讓用戶保持在當前分頁
+            self._load_file(filename=filename)
+            
+            logger.info(f"已同步圖像到數據標註分頁: {filename}")
+        except Exception as e:
+            logger.error(f"同步圖像到標註分頁時出錯: {e}")
+            QMessageBox.warning(
+                self,
+                "警告",
+                f"同步圖像到標註分頁時出錯：{str(e)}",
+            )
+
+    def _sync_pil_image_to_annotation_tab(self, pil_image) -> None:
+        """將 PIL Image 同步更新到數據標註分頁"""
+        try:
+            import PIL.Image
+            from labelme import utils
+            
+            # 將 PIL Image 轉換為圖像數據（bytes）
+            image_data = utils.img_pil_to_data(pil_image)
+            
+            # 轉換為 QImage
+            qimage = QtGui.QImage.fromData(image_data)
+            
+            if qimage.isNull():
+                QMessageBox.warning(
+                    self,
+                    "錯誤",
+                    "無法將增強後的圖像轉換為 QImage。",
+                )
+                return
+            
+            # 更新 MainWindow 的圖像相關屬性
+            self.imageData = image_data
+            self.image = qimage
+            
+            # 如果原始圖像路徑存在，保持使用該路徑；否則使用臨時路徑
+            if self.original_image_path:
+                self.imagePath = self.original_image_path
+                self.filename = self.original_image_path
+            else:
+                # 如果沒有原始路徑，創建一個臨時標識
+                self.imagePath = "augmented_image"
+                self.filename = "augmented_image"
+            
+            # 更新 canvas 顯示
+            self.canvas.loadPixmap(QtGui.QPixmap.fromImage(qimage))
+            
+            # 清除標註（因為圖像已改變）
+            self.canvas.shapes = []
+            self.canvas.storeShapes()
+            self.canvas.update()
+            
+            # 更新標籤列表
+            self.labelList.clear()
+            
+            # 注意：不自動切換分頁，讓用戶保持在當前分頁
+            
+            # 重新繪製
+            self._paint_canvas()
+            self.setClean()
+            
+            logger.info("已同步增強後的圖像到數據標註分頁")
+        except Exception as e:
+            logger.error(f"同步 PIL 圖像到標註分頁時出錯: {e}")
+            QMessageBox.warning(
+                self,
+                "警告",
+                f"同步圖像到標註分頁時出錯：{str(e)}",
+            )
+
+    def _sync_image_to_processing_tab(self, filename: str) -> None:
+        """將圖像文件同步載入到數據處理分頁"""
+        try:
+            # 檢查數據處理分頁的組件是否已初始化
+            if not hasattr(self, 'original_image_label') or self.original_image_label is None:
+                return
+            
+            import PIL.Image
+            
+            # 載入圖像
+            pil_image = PIL.Image.open(filename)
+            pil_image = pil_image.convert("RGB")
+            
+            # 更新數據處理分頁的圖像
+            self.original_pil_image = pil_image
+            self.original_image_path = filename
+            
+            # 顯示原圖
+            qimage = self._pil_to_qimage(pil_image)
+            pixmap = QtGui.QPixmap.fromImage(qimage)
+            max_size = QtCore.QSize(800, 600)
+            scaled_pixmap = pixmap.scaled(
+                max_size,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+            self.original_image_label.setPixmap(scaled_pixmap)
+            self.original_image_label.setText("")
+            self.original_image_label.resize(scaled_pixmap.size())
+            
+            # 重置增強參數並更新預覽
+            self._reset_augmentation()
+            
+            logger.info(f"已同步圖像到數據處理分頁: {filename}")
+        except Exception as e:
+            logger.error(f"同步圖像到數據處理分頁時出錯: {e}")
+            # 不顯示錯誤訊息，因為這是一個後台同步操作
 
     def _create_data_conversion_tab(self) -> QtWidgets.QWidget:
         """創建數據格式轉換分頁"""
