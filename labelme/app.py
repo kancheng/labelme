@@ -3618,26 +3618,125 @@ class MainWindow(QtWidgets.QMainWindow):
     def _create_model_export_tab(self) -> QtWidgets.QWidget:
         """創建模型匯出分頁"""
         widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        widget.setLayout(layout)
+        main_layout = QtWidgets.QVBoxLayout()
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
+        widget.setLayout(main_layout)
 
+        # 標題
         title = QtWidgets.QLabel("模型匯出 / Model Export")
         title_font = QtGui.QFont()
         title_font.setPointSize(18)
         title_font.setBold(True)
         title.setFont(title_font)
-        layout.addWidget(title)
+        main_layout.addWidget(title)
 
-        status_label = QtWidgets.QLabel("🚧 規劃中 / In Planning")
-        status_font = QtGui.QFont()
-        status_font.setPointSize(12)
-        status_font.setItalic(True)
-        status_label.setFont(status_font)
-        status_label.setStyleSheet("color: #888888;")
-        layout.addWidget(status_label)
+        # 模型文件選擇
+        model_file_group = QtWidgets.QGroupBox("模型文件 / Model File")
+        model_file_layout = QtWidgets.QVBoxLayout()
+        model_file_group.setLayout(model_file_layout)
+        
+        model_file_hbox = QtWidgets.QHBoxLayout()
+        self.model_file_line = QtWidgets.QLineEdit()
+        self.model_file_line.setPlaceholderText("請選擇 .pt 模型文件...")
+        model_file_btn = QtWidgets.QPushButton("選擇文件")
+        model_file_btn.clicked.connect(self._select_model_file)
+        model_file_hbox.addWidget(self.model_file_line)
+        model_file_hbox.addWidget(model_file_btn)
+        model_file_layout.addLayout(model_file_hbox)
+        main_layout.addWidget(model_file_group)
 
-        layout.addStretch()
+        # 輸出設置
+        output_group = QtWidgets.QGroupBox("輸出設置 / Output Settings")
+        output_layout = QtWidgets.QVBoxLayout()
+        output_group.setLayout(output_layout)
+        
+        # 輸出目錄
+        output_dir_hbox = QtWidgets.QHBoxLayout()
+        output_dir_hbox.addWidget(QtWidgets.QLabel("輸出目錄:"))
+        self.export_output_dir_line = QtWidgets.QLineEdit()
+        self.export_output_dir_line.setPlaceholderText("請選擇輸出目錄...")
+        output_dir_btn = QtWidgets.QPushButton("選擇目錄")
+        output_dir_btn.clicked.connect(self._select_export_output_directory)
+        output_dir_hbox.addWidget(self.export_output_dir_line)
+        output_dir_hbox.addWidget(output_dir_btn)
+        output_layout.addLayout(output_dir_hbox)
+        
+        # 輸出文件名
+        output_name_hbox = QtWidgets.QHBoxLayout()
+        output_name_hbox.addWidget(QtWidgets.QLabel("輸出文件名:"))
+        self.export_output_name_line = QtWidgets.QLineEdit()
+        self.export_output_name_line.setPlaceholderText("留空則使用模型文件名")
+        output_name_hbox.addWidget(self.export_output_name_line)
+        output_layout.addLayout(output_name_hbox)
+        
+        main_layout.addWidget(output_group)
+
+        # 轉換選項
+        options_group = QtWidgets.QGroupBox("轉換選項 / Conversion Options")
+        options_layout = QtWidgets.QVBoxLayout()
+        options_group.setLayout(options_layout)
+        
+        # 圖像大小
+        imgsz_hbox = QtWidgets.QHBoxLayout()
+        imgsz_hbox.addWidget(QtWidgets.QLabel("輸入圖像大小 (Image Size):"))
+        self.export_imgsz_spinbox = QtWidgets.QSpinBox()
+        self.export_imgsz_spinbox.setMinimum(320)
+        self.export_imgsz_spinbox.setMaximum(1280)
+        self.export_imgsz_spinbox.setSingleStep(32)
+        self.export_imgsz_spinbox.setValue(640)
+        imgsz_hbox.addWidget(self.export_imgsz_spinbox)
+        imgsz_hbox.addStretch()
+        options_layout.addLayout(imgsz_hbox)
+        
+        # ONNX opset 版本
+        opset_hbox = QtWidgets.QHBoxLayout()
+        opset_hbox.addWidget(QtWidgets.QLabel("ONNX Opset 版本:"))
+        self.export_opset_spinbox = QtWidgets.QSpinBox()
+        self.export_opset_spinbox.setMinimum(10)
+        self.export_opset_spinbox.setMaximum(17)
+        self.export_opset_spinbox.setValue(12)
+        opset_hbox.addWidget(self.export_opset_spinbox)
+        opset_hbox.addStretch()
+        options_layout.addLayout(opset_hbox)
+        
+        # 簡化模型
+        self.export_simplify_checkbox = QtWidgets.QCheckBox("簡化 ONNX 模型 (Simplify Model)")
+        self.export_simplify_checkbox.setChecked(True)
+        options_layout.addWidget(self.export_simplify_checkbox)
+        
+        main_layout.addWidget(options_group)
+
+        # 進度顯示
+        progress_group = QtWidgets.QGroupBox("轉換進度 / Conversion Progress")
+        progress_layout = QtWidgets.QVBoxLayout()
+        progress_group.setLayout(progress_layout)
+        
+        self.export_progress_bar = QtWidgets.QProgressBar()
+        self.export_progress_bar.setMinimum(0)
+        self.export_progress_bar.setMaximum(100)
+        self.export_progress_bar.setValue(0)
+        progress_layout.addWidget(self.export_progress_bar)
+        
+        self.export_status_text = QtWidgets.QTextEdit()
+        self.export_status_text.setReadOnly(True)
+        self.export_status_text.setMaximumHeight(150)
+        self.export_status_text.setPlaceholderText("轉換狀態將顯示在這裡...")
+        progress_layout.addWidget(self.export_status_text)
+        
+        main_layout.addWidget(progress_group)
+
+        # 轉換按鈕
+        convert_btn = QtWidgets.QPushButton("開始轉換為 ONNX")
+        convert_btn.setStyleSheet(
+            "QPushButton { background-color: #4caf50; color: white; "
+            "font-weight: bold; padding: 10px; font-size: 14px; }"
+            "QPushButton:hover { background-color: #45a049; }"
+        )
+        convert_btn.clicked.connect(self._start_pt_to_onnx_conversion)
+        main_layout.addWidget(convert_btn)
+
+        main_layout.addStretch()
         return widget
 
     def _detect_python_environments(self) -> None:
@@ -4248,6 +4347,181 @@ class MainWindow(QtWidgets.QMainWindow):
             error_msg = f"訓練過程中發生錯誤：{str(e)}"
             logger.error(error_msg, exc_info=True)
             self.training_status_text.append(f"\n❌ {error_msg}")
+            QMessageBox.critical(self, "錯誤", error_msg)
+
+
+    def _select_model_file(self) -> None:
+        """選擇 .pt 模型文件"""
+        filename, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "選擇 PyTorch 模型文件 (.pt)",
+            "",
+            "PyTorch Model Files (*.pt);;All Files (*)",
+        )
+        if filename:
+            self.model_file_line.setText(filename)
+            # 自動設置輸出文件名（如果為空）
+            if not self.export_output_name_line.text().strip():
+                base_name = os.path.splitext(os.path.basename(filename))[0]
+                self.export_output_name_line.setText(f"{base_name}.onnx")
+
+    def _select_export_output_directory(self) -> None:
+        """選擇模型匯出輸出目錄"""
+        directory = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "選擇輸出目錄",
+            "",
+            QtWidgets.QFileDialog.ShowDirsOnly | QtWidgets.QFileDialog.DontResolveSymlinks,
+        )
+        if directory:
+            self.export_output_dir_line.setText(directory)
+
+    def _start_pt_to_onnx_conversion(self) -> None:
+        """開始將 .pt 模型轉換為 .onnx 格式"""
+        # 檢查模型文件
+        model_path = self.model_file_line.text().strip()
+        if not model_path:
+            QMessageBox.warning(self, "錯誤", "請選擇 .pt 模型文件。")
+            return
+        
+        if not os.path.exists(model_path):
+            QMessageBox.warning(self, "錯誤", f"模型文件不存在: {model_path}")
+            return
+        
+        if not model_path.lower().endswith('.pt'):
+            QMessageBox.warning(self, "錯誤", "請選擇 .pt 格式的模型文件。")
+            return
+        
+        # 檢查輸出目錄
+        output_dir = self.export_output_dir_line.text().strip()
+        if not output_dir:
+            QMessageBox.warning(self, "錯誤", "請選擇輸出目錄。")
+            return
+        
+        # 檢查訓練環境（用於執行轉換的 Python 環境）
+        saved_env_path = self.settings.value("training/python_path", "")
+        if not saved_env_path:
+            QMessageBox.warning(
+                self,
+                "錯誤",
+                "請先在「1. 環境設定」分頁中設定 Python 環境。\n\n"
+                "轉換功能需要使用已安裝 PyTorch 和 Ultralytics 的 Python 環境。"
+            )
+            return
+        
+        if not os.path.exists(saved_env_path):
+            QMessageBox.warning(
+                self,
+                "錯誤",
+                f"Python 環境路徑不存在: {saved_env_path}\n請重新設定 Python 環境。"
+            )
+            return
+        
+        # 確定輸出文件路徑
+        output_name = self.export_output_name_line.text().strip()
+        if not output_name:
+            # 使用模型文件名
+            base_name = os.path.splitext(os.path.basename(model_path))[0]
+            output_name = f"{base_name}.onnx"
+        elif not output_name.lower().endswith('.onnx'):
+            output_name = f"{output_name}.onnx"
+        
+        output_path = os.path.join(output_dir, output_name)
+        
+        # 檢查輸出文件是否已存在
+        if os.path.exists(output_path):
+            reply = QMessageBox.question(
+                self,
+                "文件已存在",
+                f"輸出文件已存在：{output_path}\n\n是否要覆蓋？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+        
+        # 獲取轉換選項
+        imgsz = self.export_imgsz_spinbox.value()
+        opset = self.export_opset_spinbox.value()
+        simplify = self.export_simplify_checkbox.isChecked()
+        
+        # 確認對話框
+        confirm_msg = (
+            f"確認開始轉換？\n\n"
+            f"輸入模型: {model_path}\n"
+            f"輸出文件: {output_path}\n"
+            f"圖像大小: {imgsz}\n"
+            f"ONNX Opset: {opset}\n"
+            f"簡化模型: {'是' if simplify else '否'}\n"
+            f"Python 環境: {saved_env_path}\n"
+        )
+        
+        reply = QMessageBox.question(
+            self,
+            "確認轉換",
+            confirm_msg,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        # 重置進度條和狀態
+        self.export_progress_bar.setValue(0)
+        self.export_status_text.clear()
+        self.export_status_text.append("準備開始轉換...")
+        
+        try:
+            from labelme.function.fpt2onnx import convert_pt_to_onnx
+            
+            # 定義進度回調（使用 Qt 信號確保線程安全）
+            def progress_callback(message: str) -> None:
+                # 使用 QTimer.singleShot 確保在主線程中更新 UI
+                QtCore.QTimer.singleShot(0, lambda: self.export_status_text.append(message))
+                # 更新進度條（簡單的進度估算）
+                if "載入" in message or "load" in message.lower():
+                    QtCore.QTimer.singleShot(0, lambda: self.export_progress_bar.setValue(20))
+                elif "轉換" in message or "export" in message.lower() or "converting" in message.lower():
+                    QtCore.QTimer.singleShot(0, lambda: self.export_progress_bar.setValue(50))
+                elif "成功" in message or "success" in message.lower() or "完成" in message:
+                    QtCore.QTimer.singleShot(0, lambda: self.export_progress_bar.setValue(90))
+            
+            # 開始轉換
+            self.export_status_text.append("\n開始轉換...")
+            self.export_progress_bar.setValue(10)
+            
+            success, message = convert_pt_to_onnx(
+                model_path=model_path,
+                output_path=output_path,
+                python_path=saved_env_path,
+                imgsz=imgsz,
+                simplify=simplify,
+                opset=opset,
+                progress_callback=progress_callback,
+            )
+            
+            self.export_progress_bar.setValue(100)
+            
+            if success:
+                self.export_status_text.append(f"\n✅ {message}")
+                QMessageBox.information(
+                    self,
+                    "轉換完成",
+                    f"轉換成功完成！\n\n{message}"
+                )
+            else:
+                self.export_status_text.append(f"\n❌ {message}")
+                QMessageBox.critical(
+                    self,
+                    "轉換失敗",
+                    f"轉換過程中發生錯誤：\n\n{message}"
+                )
+                
+        except Exception as e:
+            error_msg = f"轉換過程中發生錯誤：{str(e)}"
+            logger.error(error_msg, exc_info=True)
+            self.export_status_text.append(f"\n❌ {error_msg}")
             QMessageBox.critical(self, "錯誤", error_msg)
 
 
