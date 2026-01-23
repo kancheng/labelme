@@ -3471,13 +3471,146 @@ class MainWindow(QtWidgets.QMainWindow):
 
         layout.addWidget(env_info_group)
 
-        status_label = QtWidgets.QLabel("🚧 模型訓練功能規劃中 / Model Training In Planning")
-        status_font = QtGui.QFont()
-        status_font.setPointSize(12)
-        status_font.setItalic(True)
-        status_label.setFont(status_font)
-        status_label.setStyleSheet("color: #888888;")
-        layout.addWidget(status_label)
+        # 數據集設定區域
+        dataset_group = QtWidgets.QGroupBox("數據集設定 / Dataset Settings")
+        dataset_layout = QtWidgets.QVBoxLayout()
+        dataset_group.setLayout(dataset_layout)
+        
+        # 數據集路徑選擇
+        dataset_path_layout = QtWidgets.QHBoxLayout()
+        dataset_path_layout.addWidget(QtWidgets.QLabel("YOLO 數據集路徑:"))
+        self.dataset_path_line = QtWidgets.QLineEdit()
+        self.dataset_path_line.setPlaceholderText("選擇包含 dataset.yaml 的 YOLO 數據集目錄")
+        dataset_path_layout.addWidget(self.dataset_path_line)
+        dataset_browse_btn = QtWidgets.QPushButton("瀏覽...")
+        dataset_browse_btn.clicked.connect(self._select_dataset_directory)
+        dataset_path_layout.addWidget(dataset_browse_btn)
+        dataset_layout.addLayout(dataset_path_layout)
+        
+        # 數據集檢查按鈕和狀態
+        check_dataset_layout = QtWidgets.QHBoxLayout()
+        self.check_dataset_btn = QtWidgets.QPushButton("檢查數據集")
+        self.check_dataset_btn.clicked.connect(self._check_dataset)
+        check_dataset_layout.addWidget(self.check_dataset_btn)
+        check_dataset_layout.addStretch()
+        dataset_layout.addLayout(check_dataset_layout)
+        
+        # 數據集資訊顯示
+        self.dataset_info_text = QtWidgets.QTextEdit()
+        self.dataset_info_text.setReadOnly(True)
+        self.dataset_info_text.setMaximumHeight(120)
+        self.dataset_info_text.setPlaceholderText("數據集資訊將顯示在這裡...")
+        dataset_layout.addWidget(self.dataset_info_text)
+        
+        layout.addWidget(dataset_group)
+
+        # 訓練參數設定區域
+        training_params_group = QtWidgets.QGroupBox("訓練參數設定 / Training Parameters")
+        training_params_layout = QtWidgets.QGridLayout()
+        training_params_group.setLayout(training_params_layout)
+        
+        # YOLO 版本選擇
+        training_params_layout.addWidget(QtWidgets.QLabel("YOLO 版本:"), 0, 0)
+        self.yolo_version_combo = QtWidgets.QComboBox()
+        self.yolo_version_combo.addItems(["YOLOv8 (Ultralytics)", "YOLOv5"])
+        training_params_layout.addWidget(self.yolo_version_combo, 0, 1)
+        
+        # 模型大小
+        training_params_layout.addWidget(QtWidgets.QLabel("模型大小:"), 0, 2)
+        self.model_size_combo = QtWidgets.QComboBox()
+        self.model_size_combo.addItems(["nano (n)", "small (s)", "medium (m)", "large (l)", "xlarge (x)"])
+        self.model_size_combo.setCurrentIndex(0)
+        training_params_layout.addWidget(self.model_size_combo, 0, 3)
+        
+        # 訓練輪數
+        training_params_layout.addWidget(QtWidgets.QLabel("訓練輪數 (Epochs):"), 1, 0)
+        self.epochs_spinbox = QtWidgets.QSpinBox()
+        self.epochs_spinbox.setMinimum(1)
+        self.epochs_spinbox.setMaximum(1000)
+        self.epochs_spinbox.setValue(100)
+        training_params_layout.addWidget(self.epochs_spinbox, 1, 1)
+        
+        # 圖像大小
+        training_params_layout.addWidget(QtWidgets.QLabel("圖像大小 (Image Size):"), 1, 2)
+        self.imgsz_spinbox = QtWidgets.QSpinBox()
+        self.imgsz_spinbox.setMinimum(320)
+        self.imgsz_spinbox.setMaximum(1280)
+        self.imgsz_spinbox.setSingleStep(32)
+        self.imgsz_spinbox.setValue(640)
+        training_params_layout.addWidget(self.imgsz_spinbox, 1, 3)
+        
+        # 批次大小
+        training_params_layout.addWidget(QtWidgets.QLabel("批次大小 (Batch Size):"), 2, 0)
+        self.batch_spinbox = QtWidgets.QSpinBox()
+        self.batch_spinbox.setMinimum(1)
+        self.batch_spinbox.setMaximum(128)
+        self.batch_spinbox.setValue(16)
+        training_params_layout.addWidget(self.batch_spinbox, 2, 1)
+        
+        # 設備選擇
+        training_params_layout.addWidget(QtWidgets.QLabel("設備 (Device):"), 2, 2)
+        self.device_combo = QtWidgets.QComboBox()
+        self.device_combo.addItems(["自動檢測", "CPU", "GPU 0", "GPU 1", "GPU 2", "GPU 3"])
+        training_params_layout.addWidget(self.device_combo, 2, 3)
+        
+        layout.addWidget(training_params_group)
+
+        # 輸出目錄設定
+        output_group = QtWidgets.QGroupBox("輸出設定 / Output Settings")
+        output_layout = QtWidgets.QVBoxLayout()
+        output_group.setLayout(output_layout)
+        
+        output_path_layout = QtWidgets.QHBoxLayout()
+        output_path_layout.addWidget(QtWidgets.QLabel("輸出目錄:"))
+        self.training_output_dir_line = QtWidgets.QLineEdit()
+        self.training_output_dir_line.setPlaceholderText("選擇訓練結果保存目錄")
+        output_path_layout.addWidget(self.training_output_dir_line)
+        output_browse_btn = QtWidgets.QPushButton("瀏覽...")
+        output_browse_btn.clicked.connect(self._select_training_output_directory)
+        output_path_layout.addWidget(output_browse_btn)
+        output_layout.addLayout(output_path_layout)
+        
+        # 專案名稱
+        project_name_layout = QtWidgets.QHBoxLayout()
+        project_name_layout.addWidget(QtWidgets.QLabel("專案名稱:"))
+        self.project_name_line = QtWidgets.QLineEdit()
+        self.project_name_line.setPlaceholderText("yolov8_training")
+        self.project_name_line.setText("yolov8_training")
+        project_name_layout.addWidget(self.project_name_line)
+        project_name_layout.addStretch()
+        output_layout.addLayout(project_name_layout)
+        
+        layout.addWidget(output_group)
+
+        # 進度顯示區域
+        progress_group = QtWidgets.QGroupBox("訓練進度 / Training Progress")
+        progress_layout = QtWidgets.QVBoxLayout()
+        progress_group.setLayout(progress_layout)
+        
+        self.training_progress_bar = QtWidgets.QProgressBar()
+        self.training_progress_bar.setMinimum(0)
+        self.training_progress_bar.setMaximum(100)
+        self.training_progress_bar.setValue(0)
+        progress_layout.addWidget(self.training_progress_bar)
+        
+        self.training_status_text = QtWidgets.QTextEdit()
+        self.training_status_text.setReadOnly(True)
+        self.training_status_text.setMaximumHeight(200)
+        self.training_status_text.setPlaceholderText("訓練狀態將顯示在這裡...")
+        progress_layout.addWidget(self.training_status_text)
+        
+        layout.addWidget(progress_group)
+
+        # 訓練按鈕
+        train_btn = QtWidgets.QPushButton("開始訓練")
+        train_btn.setStyleSheet(
+            "QPushButton { background-color: #4caf50; color: white; "
+            "font-weight: bold; padding: 12px; font-size: 14px; }"
+            "QPushButton:hover { background-color: #45a049; }"
+            "QPushButton:disabled { background-color: #cccccc; }"
+        )
+        train_btn.clicked.connect(self._start_training)
+        layout.addWidget(train_btn)
 
         layout.addStretch()
         return widget
@@ -3845,6 +3978,277 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # 重新顯示環境列表以更新選中狀態
         self._detect_python_environments()
+
+    def _select_dataset_directory(self) -> None:
+        """選擇 YOLO 數據集目錄"""
+        directory = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "選擇 YOLO 數據集目錄",
+            "",
+            QtWidgets.QFileDialog.ShowDirsOnly | QtWidgets.QFileDialog.DontResolveSymlinks,
+        )
+        if directory:
+            self.dataset_path_line.setText(directory)
+
+    def _select_training_output_directory(self) -> None:
+        """選擇訓練輸出目錄"""
+        directory = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "選擇訓練輸出目錄",
+            "",
+            QtWidgets.QFileDialog.ShowDirsOnly | QtWidgets.QFileDialog.DontResolveSymlinks,
+        )
+        if directory:
+            self.training_output_dir_line.setText(directory)
+
+    def _check_dataset(self) -> None:
+        """檢查 YOLO 數據集"""
+        dataset_path = self.dataset_path_line.text().strip()
+        
+        if not dataset_path:
+            QMessageBox.warning(self, "錯誤", "請先選擇數據集路徑。")
+            return
+        
+        if not os.path.exists(dataset_path):
+            QMessageBox.warning(self, "錯誤", f"數據集路徑不存在: {dataset_path}")
+            return
+        
+        try:
+            from labelme.function.ftrain_yolo import check_yolo_dataset
+            
+            self.check_dataset_btn.setEnabled(False)
+            self.check_dataset_btn.setText("檢查中...")
+            self.dataset_info_text.clear()
+            self.dataset_info_text.append("正在檢查數據集...")
+            
+            is_valid, error_msg, dataset_info = check_yolo_dataset(dataset_path)
+            
+            if is_valid:
+                info_text = "✅ 數據集檢查通過！\n\n"
+                info_text += f"數據集路徑: {dataset_info['yaml_path']}\n"
+                info_text += f"類別數量: {dataset_info['num_classes']}\n"
+                info_text += f"類別名稱: {', '.join(dataset_info['class_names'])}\n\n"
+                info_text += f"訓練圖像: {dataset_info['train_images_count']} 張\n"
+                info_text += f"訓練標籤: {dataset_info['train_labels_count']} 個\n"
+                info_text += f"驗證圖像: {dataset_info['val_images_count']} 張\n"
+                info_text += f"驗證標籤: {dataset_info['val_labels_count']} 個\n"
+                self.dataset_info_text.setText(info_text)
+                self.dataset_info_text.setStyleSheet("color: #4caf50;")
+            else:
+                error_text = f"❌ 數據集檢查失敗:\n\n{error_msg}"
+                self.dataset_info_text.setText(error_text)
+                self.dataset_info_text.setStyleSheet("color: #f44336;")
+                QMessageBox.warning(self, "數據集檢查失敗", error_msg)
+                
+        except Exception as e:
+            error_msg = f"檢查數據集時發生錯誤: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            self.dataset_info_text.setText(f"❌ {error_msg}")
+            self.dataset_info_text.setStyleSheet("color: #f44336;")
+            QMessageBox.critical(self, "錯誤", error_msg)
+        finally:
+            self.check_dataset_btn.setEnabled(True)
+            self.check_dataset_btn.setText("檢查數據集")
+
+    def _start_training(self) -> None:
+        """開始訓練模型"""
+        # 檢查訓練環境
+        saved_env_path = self.settings.value("training/python_path", "")
+        if not saved_env_path:
+            QMessageBox.warning(
+                self,
+                "錯誤",
+                "請先在「1. 環境設定」分頁中設定訓練環境。"
+            )
+            return
+        
+        if not os.path.exists(saved_env_path):
+            QMessageBox.warning(
+                self,
+                "錯誤",
+                f"訓練環境路徑不存在: {saved_env_path}\n請重新設定訓練環境。"
+            )
+            return
+        
+        # 檢查數據集
+        dataset_path = self.dataset_path_line.text().strip()
+        if not dataset_path:
+            QMessageBox.warning(self, "錯誤", "請選擇 YOLO 數據集路徑。")
+            return
+        
+        dataset_yaml = os.path.join(dataset_path, "dataset.yaml")
+        if not os.path.exists(dataset_yaml):
+            QMessageBox.warning(
+                self,
+                "錯誤",
+                f"找不到 dataset.yaml 文件: {dataset_yaml}"
+            )
+            return
+        
+        # 檢查輸出目錄
+        output_dir = self.training_output_dir_line.text().strip()
+        if not output_dir:
+            QMessageBox.warning(self, "錯誤", "請選擇輸出目錄。")
+            return
+        
+        # 獲取訓練參數
+        yolo_version = self.yolo_version_combo.currentText()
+        is_v8 = "v8" in yolo_version.lower()
+        
+        model_size_map = {
+            "nano (n)": "n",
+            "small (s)": "s",
+            "medium (m)": "m",
+            "large (l)": "l",
+            "xlarge (x)": "x"
+        }
+        model_size = model_size_map[self.model_size_combo.currentText()]
+        
+        epochs = self.epochs_spinbox.value()
+        imgsz = self.imgsz_spinbox.value()
+        batch = self.batch_spinbox.value()
+        
+        device_map = {
+            "自動檢測": "0",
+            "CPU": "cpu",
+            "GPU 0": "0",
+            "GPU 1": "1",
+            "GPU 2": "2",
+            "GPU 3": "3"
+        }
+        device = device_map[self.device_combo.currentText()]
+        
+        project_name = self.project_name_line.text().strip()
+        if not project_name:
+            project_name = "yolov8_training" if is_v8 else "yolov5_training"
+        
+        # 確認對話框
+        confirm_msg = (
+            f"確認開始訓練？\n\n"
+            f"YOLO 版本: {yolo_version}\n"
+            f"模型大小: {model_size}\n"
+            f"訓練輪數: {epochs}\n"
+            f"圖像大小: {imgsz}\n"
+            f"批次大小: {batch}\n"
+            f"設備: {device}\n"
+            f"輸出目錄: {output_dir}\n"
+        )
+        
+        reply = QMessageBox.question(
+            self,
+            "確認訓練",
+            confirm_msg,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        # 重置進度條和狀態
+        self.training_progress_bar.setValue(0)
+        self.training_status_text.clear()
+        self.training_status_text.append("準備開始訓練...")
+        
+        # 在後台線程中執行訓練
+        try:
+            from labelme.function.ftrain_yolo import (
+                check_yolo_installation,
+                train_yolo_v8,
+                train_yolo_v5,
+            )
+            
+            # 檢查 YOLO 安裝
+            yolo_version_str = "v8" if is_v8 else "v5"
+            is_installed, install_msg = check_yolo_installation(saved_env_path, yolo_version_str)
+            
+            if not is_installed:
+                self.training_status_text.append(f"⚠️ {install_msg}")
+                reply = QMessageBox.question(
+                    self,
+                    "YOLO 未安裝",
+                    f"{install_msg}\n\n是否要繼續？（訓練可能會失敗）",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if reply != QMessageBox.Yes:
+                    return
+            else:
+                self.training_status_text.append(f"✅ {install_msg}")
+            
+            # 定義進度回調（使用 Qt 信號確保線程安全）
+            def progress_callback(message: str) -> None:
+                # 使用 QTimer.singleShot 確保在主線程中更新 UI
+                QtCore.QTimer.singleShot(0, lambda: self.training_status_text.append(message))
+                # 嘗試從訊息中提取進度（如果有的話）
+                if "epoch" in message.lower() and "/" in message:
+                    try:
+                        # 簡單的進度提取邏輯
+                        parts = message.split()
+                        for i, part in enumerate(parts):
+                            if "epoch" in part.lower() and i + 1 < len(parts):
+                                epoch_info = parts[i + 1]
+                                if "/" in epoch_info:
+                                    current, total = epoch_info.split("/")
+                                    progress = int((int(current) / int(total)) * 100)
+                                    QtCore.QTimer.singleShot(0, lambda p=progress: self.training_progress_bar.setValue(min(p, 99)))
+                                    break
+                    except:
+                        pass
+            
+            # 開始訓練
+            self.training_status_text.append("\n開始訓練...")
+            self.training_progress_bar.setValue(5)
+            
+            if is_v8:
+                success, message = train_yolo_v8(
+                    dataset_yaml=dataset_yaml,
+                    output_dir=output_dir,
+                    python_path=saved_env_path,
+                    epochs=epochs,
+                    imgsz=imgsz,
+                    batch=batch,
+                    device=device,
+                    project_name=project_name,
+                    model_size=model_size,
+                    progress_callback=progress_callback,
+                )
+            else:
+                success, message = train_yolo_v5(
+                    dataset_yaml=dataset_yaml,
+                    output_dir=output_dir,
+                    python_path=saved_env_path,
+                    epochs=epochs,
+                    imgsz=imgsz,
+                    batch=batch,
+                    device=device,
+                    project_name=project_name,
+                    model_size=model_size,
+                    progress_callback=progress_callback,
+                )
+            
+            self.training_progress_bar.setValue(100)
+            
+            if success:
+                self.training_status_text.append(f"\n✅ {message}")
+                QMessageBox.information(
+                    self,
+                    "訓練完成",
+                    f"訓練成功完成！\n\n{message}"
+                )
+            else:
+                self.training_status_text.append(f"\n❌ {message}")
+                QMessageBox.critical(
+                    self,
+                    "訓練失敗",
+                    f"訓練過程中發生錯誤：\n\n{message}"
+                )
+                
+        except Exception as e:
+            error_msg = f"訓練過程中發生錯誤：{str(e)}"
+            logger.error(error_msg, exc_info=True)
+            self.training_status_text.append(f"\n❌ {error_msg}")
+            QMessageBox.critical(self, "錯誤", error_msg)
 
 
 def _scan_image_files(root_dir: str) -> list[str]:
