@@ -205,7 +205,7 @@ os.chdir(os.path.dirname(dataset_yaml_path))
 # 創建模型
 model = YOLO('yolov8{model_size}.pt')
 
-# 開始訓練
+# 開始訓練（workers=0 避免 Windows 下 DataLoader 多進程崩潰）
 results = model.train(
     data=dataset_yaml_path,
     epochs={epochs},
@@ -214,6 +214,7 @@ results = model.train(
     device='{device}',
     project=r'{output_dir_escaped}',
     name='{project_name}',
+    workers=0,
     exist_ok=True,
     verbose=True,
 )
@@ -231,14 +232,18 @@ print(f"最佳模型保存在: {{results.save_dir}}")
         if progress_callback:
             progress_callback("開始訓練 YOLOv8 模型...")
         
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
         process = subprocess.Popen(
             [python_path, script_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,
-            universal_newlines=True,
-            cwd=output_dir
+            cwd=output_dir,
+            env=env,
         )
         
         # 實時輸出
@@ -302,6 +307,7 @@ def train_yolo_v5(
         os.makedirs(output_dir, exist_ok=True)
         
         # 構建訓練命令
+        # workers=0 避免 Windows 下 DataLoader 多進程崩潰
         train_cmd = [
             python_path,
             "-m", "yolov5.train",
@@ -310,6 +316,7 @@ def train_yolo_v5(
             "--img", str(imgsz),
             "--batch", str(batch),
             "--device", device,
+            "--workers", "0",
             "--project", output_dir,
             "--name", project_name,
             "--exist-ok",
@@ -318,15 +325,19 @@ def train_yolo_v5(
         if progress_callback:
             progress_callback("開始訓練 YOLOv5 模型...")
         
-        # 執行訓練
+        # 執行訓練（encoding=utf-8 避免 Windows GBK 解碼錯誤）
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
         process = subprocess.Popen(
             train_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,
-            universal_newlines=True,
-            cwd=output_dir
+            cwd=output_dir,
+            env=env,
         )
         
         # 實時輸出

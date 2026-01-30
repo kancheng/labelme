@@ -85,6 +85,90 @@ _AI_TEXT_TO_ANNOTATION_CREATE_MODE_TO_SHAPE_TYPE: dict[
 }
 
 
+class _TrainingWorker(QtCore.QThread):
+    """背景執行 YOLO 訓練，避免阻塞 GUI"""
+    progress_message = QtCore.pyqtSignal(str)
+    progress_value = QtCore.pyqtSignal(int)
+    finished_result = QtCore.pyqtSignal(bool, str)  # success, message
+
+    def __init__(
+        self,
+        *,
+        dataset_yaml: str,
+        output_dir: str,
+        python_path: str,
+        is_v8: bool,
+        epochs: int,
+        imgsz: int,
+        batch: int,
+        device: str,
+        project_name: str,
+        model_size: str,
+    ):
+        super().__init__()
+        self._dataset_yaml = dataset_yaml
+        self._output_dir = output_dir
+        self._python_path = python_path
+        self._is_v8 = is_v8
+        self._epochs = epochs
+        self._imgsz = imgsz
+        self._batch = batch
+        self._device = device
+        self._project_name = project_name
+        self._model_size = model_size
+
+    def run(self) -> None:
+        try:
+            from labelme.function.ftrain_yolo import train_yolo_v8, train_yolo_v5
+
+            def on_progress(msg: str) -> None:
+                self.progress_message.emit(msg)
+                if "epoch" in msg.lower() and "/" in msg:
+                    try:
+                        parts = msg.split()
+                        for i, part in enumerate(parts):
+                            if "epoch" in part.lower() and i + 1 < len(parts):
+                                epoch_info = parts[i + 1]
+                                if "/" in epoch_info:
+                                    cur, total = epoch_info.split("/")
+                                    p = int((int(cur) / int(total)) * 100)
+                                    self.progress_value.emit(min(p, 99))
+                                    break
+                    except Exception:
+                        pass
+
+            if self._is_v8:
+                success, message = train_yolo_v8(
+                    dataset_yaml=self._dataset_yaml,
+                    output_dir=self._output_dir,
+                    python_path=self._python_path,
+                    epochs=self._epochs,
+                    imgsz=self._imgsz,
+                    batch=self._batch,
+                    device=self._device,
+                    project_name=self._project_name,
+                    model_size=self._model_size,
+                    progress_callback=on_progress,
+                )
+            else:
+                success, message = train_yolo_v5(
+                    dataset_yaml=self._dataset_yaml,
+                    output_dir=self._output_dir,
+                    python_path=self._python_path,
+                    epochs=self._epochs,
+                    imgsz=self._imgsz,
+                    batch=self._batch,
+                    device=self._device,
+                    project_name=self._project_name,
+                    model_size=self._model_size,
+                    progress_callback=on_progress,
+                )
+            self.finished_result.emit(success, message)
+        except Exception as e:
+            logger.error("Training worker error: %s", e, exc_info=True)
+            self.finished_result.emit(False, str(e))
+
+
 class MainWindow(QtWidgets.QMainWindow):
     filename: str | None
     _config: dict
@@ -3601,16 +3685,16 @@ class MainWindow(QtWidgets.QMainWindow):
         
         layout.addWidget(progress_group)
 
-        # 訓練按鈕
-        train_btn = QtWidgets.QPushButton("開始訓練")
-        train_btn.setStyleSheet(
+        # 訓練按鈕（保存參考以便訓練時禁用/恢復）
+        self.train_btn = QtWidgets.QPushButton("開始訓練")
+        self.train_btn.setStyleSheet(
             "QPushButton { background-color: #4caf50; color: white; "
             "font-weight: bold; padding: 12px; font-size: 14px; }"
             "QPushButton:hover { background-color: #45a049; }"
             "QPushButton:disabled { background-color: #cccccc; }"
         )
-        train_btn.clicked.connect(self._start_training)
-        layout.addWidget(train_btn)
+        self.train_btn.clicked.connect(self._start_training)
+        layout.addWidget(self.train_btn)
 
         layout.addStretch()
         return widget
@@ -4243,111 +4327,79 @@ class MainWindow(QtWidgets.QMainWindow):
         
         if reply != QMessageBox.Yes:
             return
-        
+
+        # 避免重複啟動
+        if getattr(self, "_training_worker", None) is not None and self._training_worker.isRunning():
+            QMessageBox.warning(self, "提示", "訓練正在進行中，請稍候。")
+            return
+
+        from labelme.function.ftrain_yolo import check_yolo_installation
+
+        # 檢查 YOLO 安裝（主線程快速檢查）
+        yolo_version_str = "v8" if is_v8 else "v5"
+        is_installed, install_msg = check_yolo_installation(saved_env_path, yolo_version_str)
+        if not is_installed:
+            self.training_status_text.append(f"⚠️ {install_msg}")
+            reply = QMessageBox.question(
+                self,
+                "YOLO 未安裝",
+                f"{install_msg}\n\n是否要繼續？（訓練可能會失敗）",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
         # 重置進度條和狀態
         self.training_progress_bar.setValue(0)
         self.training_status_text.clear()
         self.training_status_text.append("準備開始訓練...")
-        
-        # 在後台線程中執行訓練
-        try:
-            from labelme.function.ftrain_yolo import (
-                check_yolo_installation,
-                train_yolo_v8,
-                train_yolo_v5,
+        if is_installed:
+            self.training_status_text.append(f"✅ {install_msg}")
+        else:
+            self.training_status_text.append(f"⚠️ {install_msg}")
+        self.training_status_text.append("\n開始訓練...（背景執行，視窗可正常操作）")
+        self.training_progress_bar.setValue(5)
+
+        # 建立背景訓練 worker
+        self._training_worker = _TrainingWorker(
+            dataset_yaml=dataset_yaml,
+            output_dir=output_dir,
+            python_path=saved_env_path,
+            is_v8=is_v8,
+            epochs=epochs,
+            imgsz=imgsz,
+            batch=batch,
+            device=device,
+            project_name=project_name,
+            model_size=model_size,
+        )
+        self._training_worker.progress_message.connect(self.training_status_text.append)
+        self._training_worker.progress_value.connect(self.training_progress_bar.setValue)
+        self._training_worker.finished_result.connect(self._on_training_finished)
+
+        self.train_btn.setEnabled(False)
+        self._training_worker.start()
+
+    def _on_training_finished(self, success: bool, message: str) -> None:
+        """訓練結束時由 worker 信號觸發，在主線程更新 UI"""
+        self.training_progress_bar.setValue(100)
+        self._training_worker = None
+        self.train_btn.setEnabled(True)
+        if success:
+            self.training_status_text.append(f"\n✅ {message}")
+            QMessageBox.information(
+                self,
+                "訓練完成",
+                f"訓練成功完成！\n\n{message}"
             )
-            
-            # 檢查 YOLO 安裝
-            yolo_version_str = "v8" if is_v8 else "v5"
-            is_installed, install_msg = check_yolo_installation(saved_env_path, yolo_version_str)
-            
-            if not is_installed:
-                self.training_status_text.append(f"⚠️ {install_msg}")
-                reply = QMessageBox.question(
-                    self,
-                    "YOLO 未安裝",
-                    f"{install_msg}\n\n是否要繼續？（訓練可能會失敗）",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
-                )
-                if reply != QMessageBox.Yes:
-                    return
-            else:
-                self.training_status_text.append(f"✅ {install_msg}")
-            
-            # 定義進度回調（使用 Qt 信號確保線程安全）
-            def progress_callback(message: str) -> None:
-                # 使用 QTimer.singleShot 確保在主線程中更新 UI
-                QtCore.QTimer.singleShot(0, lambda: self.training_status_text.append(message))
-                # 嘗試從訊息中提取進度（如果有的話）
-                if "epoch" in message.lower() and "/" in message:
-                    try:
-                        # 簡單的進度提取邏輯
-                        parts = message.split()
-                        for i, part in enumerate(parts):
-                            if "epoch" in part.lower() and i + 1 < len(parts):
-                                epoch_info = parts[i + 1]
-                                if "/" in epoch_info:
-                                    current, total = epoch_info.split("/")
-                                    progress = int((int(current) / int(total)) * 100)
-                                    QtCore.QTimer.singleShot(0, lambda p=progress: self.training_progress_bar.setValue(min(p, 99)))
-                                    break
-                    except:
-                        pass
-            
-            # 開始訓練
-            self.training_status_text.append("\n開始訓練...")
-            self.training_progress_bar.setValue(5)
-            
-            if is_v8:
-                success, message = train_yolo_v8(
-                    dataset_yaml=dataset_yaml,
-                    output_dir=output_dir,
-                    python_path=saved_env_path,
-                    epochs=epochs,
-                    imgsz=imgsz,
-                    batch=batch,
-                    device=device,
-                    project_name=project_name,
-                    model_size=model_size,
-                    progress_callback=progress_callback,
-                )
-            else:
-                success, message = train_yolo_v5(
-                    dataset_yaml=dataset_yaml,
-                    output_dir=output_dir,
-                    python_path=saved_env_path,
-                    epochs=epochs,
-                    imgsz=imgsz,
-                    batch=batch,
-                    device=device,
-                    project_name=project_name,
-                    model_size=model_size,
-                    progress_callback=progress_callback,
-                )
-            
-            self.training_progress_bar.setValue(100)
-            
-            if success:
-                self.training_status_text.append(f"\n✅ {message}")
-                QMessageBox.information(
-                    self,
-                    "訓練完成",
-                    f"訓練成功完成！\n\n{message}"
-                )
-            else:
-                self.training_status_text.append(f"\n❌ {message}")
-                QMessageBox.critical(
-                    self,
-                    "訓練失敗",
-                    f"訓練過程中發生錯誤：\n\n{message}"
-                )
-                
-        except Exception as e:
-            error_msg = f"訓練過程中發生錯誤：{str(e)}"
-            logger.error(error_msg, exc_info=True)
-            self.training_status_text.append(f"\n❌ {error_msg}")
-            QMessageBox.critical(self, "錯誤", error_msg)
+        else:
+            self.training_status_text.append(f"\n❌ {message}")
+            QMessageBox.critical(
+                self,
+                "訓練失敗",
+                f"訓練過程中發生錯誤：\n\n{message}"
+            )
 
 
     def _select_model_file(self) -> None:
