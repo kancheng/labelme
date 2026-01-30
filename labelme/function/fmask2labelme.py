@@ -86,13 +86,14 @@ def process_dataset(dataset_dir, output_dir, label_names):
                 output_json_path = os.path.join(output_dir, output_json_name)
                 output_image_path = os.path.join(output_dir, output_image_name)
 
-                # 轉換 mask 為 Labelme JSON
-                mask_to_labelme(image_path, mask_path, output_json_path, label_names)
-
-                # 複製原始圖像到輸出目錄
-                shutil.copy(image_path, output_image_path)
-
-                print(f"Converted {mask_filename} to {output_json_name} and copied {output_image_name}.")
+                try:
+                    # 轉換 mask 為 Labelme JSON
+                    mask_to_labelme(image_path, mask_path, output_json_path, label_names)
+                    # 複製原始圖像到輸出目錄
+                    shutil.copy(image_path, output_image_path)
+                    print(f"Converted {mask_filename} to {output_json_name} and copied {output_image_name}.")
+                except Exception as e:
+                    print(f"跳過 {mask_filename}：{e}")
 
 def mask2labelme(dataset_dir, output_dir, label_names):
     os.makedirs(output_dir, exist_ok=True)

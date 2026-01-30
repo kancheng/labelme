@@ -169,6 +169,163 @@ class _TrainingWorker(QtCore.QThread):
             self.finished_result.emit(False, str(e))
 
 
+class _ConversionWorker(QtCore.QThread):
+    """背景執行數據轉換，避免阻塞 GUI 或未捕獲例外導致程式當掉"""
+    progress_message = QtCore.pyqtSignal(str)
+    progress_value = QtCore.pyqtSignal(int)
+    finished_result = QtCore.pyqtSignal(bool, str)  # success, message
+
+    def __init__(
+        self,
+        *,
+        input_dir: str,
+        output_dir: str,
+        input_format: str,
+        conversion_mode: int,
+        yolo_seg: bool,
+        val_size: float,
+    ):
+        super().__init__()
+        self._input_dir = input_dir
+        self._output_dir = output_dir
+        self._input_format = input_format
+        self._conversion_mode = conversion_mode
+        self._yolo_seg = yolo_seg
+        self._val_size = val_size
+
+    def run(self) -> None:
+        import os.path as osp
+        import shutil
+        def log(msg):
+            self.progress_message.emit(msg)
+        try:
+            if self._conversion_mode == 0:  # 單向：Labelme → YOLO + Mask
+                self.progress_message.emit("正在轉換 Labelme → Mask...")
+                self.progress_value.emit(10)
+                from labelme.function.flabelme2mask import lme2mask
+                mask_output_dir = osp.join(self._output_dir, "mask_output")
+                os.makedirs(mask_output_dir, exist_ok=True)
+                lme2mask(self._input_dir, mask_output_dir + os.sep, log_callback=log)
+                self.progress_message.emit("✓ Labelme → Mask 轉換完成")
+                self.progress_value.emit(50)
+                self.progress_message.emit("正在轉換 Labelme → YOLO...")
+                from labelme.function.flabelme2yolov8 import lme2yolov8
+                yolo_output_dir = osp.join(self._output_dir, "yolo_output")
+                os.makedirs(yolo_output_dir, exist_ok=True)
+                lme2yolov8(
+                    json_dir=self._input_dir,
+                    seg=self._yolo_seg,
+                    val_size=self._val_size,
+                    json_name=None,
+                    other_path=yolo_output_dir + os.sep,
+                )
+                self.progress_message.emit("✓ Labelme → YOLO 轉換完成")
+                self.progress_value.emit(100)
+                self.finished_result.emit(True, "轉換完成")
+                return
+
+            # 自動轉換：輸入格式 → 三種格式
+            labelme_output = osp.join(self._output_dir, "labelme_output")
+            yolo_output = osp.join(self._output_dir, "yolo_output")
+            mask_output = osp.join(self._output_dir, "mask_output")
+            os.makedirs(labelme_output, exist_ok=True)
+            os.makedirs(yolo_output, exist_ok=True)
+            os.makedirs(mask_output, exist_ok=True)
+
+            if self._input_format == "Labelme":
+                self.progress_message.emit("正在轉換 Labelme → YOLO...")
+                self.progress_value.emit(20)
+                from labelme.function.flabelme2yolov8 import lme2yolov8
+                lme2yolov8(
+                    json_dir=self._input_dir,
+                    seg=self._yolo_seg,
+                    val_size=self._val_size,
+                    json_name=None,
+                    other_path=yolo_output + os.sep,
+                )
+                self.progress_message.emit("✓ Labelme → YOLO 轉換完成")
+                self.progress_message.emit("正在轉換 Labelme → Mask...")
+                self.progress_value.emit(50)
+                from labelme.function.flabelme2mask import lme2mask
+                lme2mask(self._input_dir, mask_output + os.sep, log_callback=log)
+                self.progress_message.emit("✓ Labelme → Mask 轉換完成")
+                self.progress_message.emit("正在複製 Labelme 文件...")
+                self.progress_value.emit(70)
+                for filename in os.listdir(self._input_dir):
+                    if filename.endswith(('.json', '.png', '.jpg', '.jpeg', '.bmp')):
+                        shutil.copy(
+                            osp.join(self._input_dir, filename),
+                            osp.join(labelme_output, filename),
+                        )
+                self.progress_message.emit("✓ Labelme 文件複製完成")
+                self.progress_value.emit(100)
+
+            elif self._input_format == "YOLO":
+                self.progress_message.emit("正在轉換 YOLO → Labelme...")
+                self.progress_value.emit(20)
+                from labelme.function.fyolo2labelme import yolo2labelme
+                yolo2labelme(data=self._input_dir, out=labelme_output, skip=True)
+                self.progress_message.emit("✓ YOLO → Labelme 轉換完成")
+                self.progress_message.emit("正在轉換 YOLO → Mask...")
+                self.progress_value.emit(50)
+                images_dir = osp.join(self._input_dir, "images")
+                labels_dir = osp.join(self._input_dir, "labels")
+                if osp.exists(images_dir) and osp.exists(labels_dir):
+                    from labelme.function.fyolo2masks import yolo2masks
+                    yolo2masks(txt=labels_dir, img=images_dir, out=mask_output)
+                    self.progress_message.emit("✓ YOLO → Mask 轉換完成")
+                else:
+                    self.progress_message.emit("⚠ 未找到 YOLO images/labels 目錄，跳過 Mask 轉換")
+                self.progress_message.emit("正在複製 YOLO 文件...")
+                self.progress_value.emit(80)
+                for root, _dirs, files in os.walk(self._input_dir):
+                    for filename in files:
+                        src_path = osp.join(root, filename)
+                        rel_path = osp.relpath(src_path, self._input_dir)
+                        dst_path = osp.join(yolo_output, rel_path)
+                        os.makedirs(osp.dirname(dst_path), exist_ok=True)
+                        shutil.copy(src_path, dst_path)
+                self.progress_message.emit("✓ YOLO 文件複製完成")
+                self.progress_value.emit(100)
+
+            elif self._input_format == "Mask":
+                self.progress_message.emit("正在轉換 Mask → Labelme...")
+                self.progress_value.emit(20)
+                from labelme.function.fmask2labelme import mask2labelme
+                label_names = {0: "object"}
+                mask2labelme(
+                    dataset_dir=self._input_dir,
+                    output_dir=labelme_output,
+                    label_names=label_names,
+                )
+                self.progress_message.emit("✓ Mask → Labelme 轉換完成")
+                self.progress_message.emit("正在轉換 Mask → YOLO...")
+                self.progress_value.emit(50)
+                try:
+                    from labelme.function.fmask2yolo import mask2yolo
+                    mask2yolo(input_dir=self._input_dir, output_dir=yolo_output)
+                    self.progress_message.emit("✓ Mask → YOLO 轉換完成")
+                except Exception as e:
+                    self.progress_message.emit(f"✗ Mask → YOLO 轉換失敗：{e}")
+                self.progress_message.emit("正在複製 Mask 文件...")
+                self.progress_value.emit(80)
+                for root, _dirs, files in os.walk(self._input_dir):
+                    for filename in files:
+                        if filename.endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                            src_path = osp.join(root, filename)
+                            rel_path = osp.relpath(src_path, self._input_dir)
+                            dst_path = osp.join(mask_output, rel_path)
+                            os.makedirs(osp.dirname(dst_path), exist_ok=True)
+                            shutil.copy(src_path, dst_path)
+                self.progress_message.emit("✓ Mask 文件複製完成")
+                self.progress_value.emit(100)
+
+            self.finished_result.emit(True, "轉換完成")
+        except Exception as e:
+            logger.error("Conversion worker error: %s", e, exc_info=True)
+            self.finished_result.emit(False, str(e))
+
+
 class MainWindow(QtWidgets.QMainWindow):
     filename: str | None
     _config: dict
@@ -3223,15 +3380,16 @@ class MainWindow(QtWidgets.QMainWindow):
         
         main_layout.addWidget(progress_group)
 
-        # 轉換按鈕
-        convert_btn = QtWidgets.QPushButton("開始轉換")
-        convert_btn.setStyleSheet(
+        # 轉換按鈕（保存參考以便轉換時禁用/恢復）
+        self.convert_btn = QtWidgets.QPushButton("開始轉換")
+        self.convert_btn.setStyleSheet(
             "QPushButton { background-color: #4caf50; color: white; "
             "font-weight: bold; padding: 10px; font-size: 14px; }"
             "QPushButton:hover { background-color: #45a049; }"
+            "QPushButton:disabled { background-color: #cccccc; }"
         )
-        convert_btn.clicked.connect(self._start_conversion)
-        main_layout.addWidget(convert_btn)
+        self.convert_btn.clicked.connect(self._start_conversion)
+        main_layout.addWidget(self.convert_btn)
 
         main_layout.addStretch()
         return widget
@@ -3259,50 +3417,65 @@ class MainWindow(QtWidgets.QMainWindow):
             self.output_dir_line.setText(directory)
 
     def _start_conversion(self) -> None:
-        """開始轉換"""
+        """開始轉換（背景執行，避免未捕獲例外導致程式當掉）"""
         input_dir = self.input_dir_line.text().strip()
         output_dir = self.output_dir_line.text().strip()
         input_format = self.input_format_combo.currentText()
         conversion_mode = self.conversion_mode_combo.currentIndex()
-        
+
         if not input_dir or not os.path.exists(input_dir):
             QMessageBox.warning(self, "錯誤", "請選擇有效的輸入目錄。")
             return
-        
+
         if not output_dir:
             QMessageBox.warning(self, "錯誤", "請選擇輸出目錄。")
             return
-        
-        # 重置進度條和狀態
+
+        if conversion_mode == 0 and input_format != "Labelme":
+            QMessageBox.warning(
+                self,
+                "錯誤",
+                "單向轉換模式僅支持從 Labelme 格式轉換。",
+            )
+            return
+
+        if getattr(self, "_conversion_worker", None) is not None and self._conversion_worker.isRunning():
+            QMessageBox.warning(self, "提示", "轉換正在進行中，請稍候。")
+            return
+
+        yolo_seg = self.yolo_seg_checkbox.isChecked()
+        val_size = self.val_size_spinbox.value()
+
         self.progress_bar.setValue(0)
         self.status_text.clear()
-        self.status_text.append("開始轉換...")
-        
-        try:
-            if conversion_mode == 0:  # 單向轉換：Labelme → YOLO + Mask
-                if input_format != "Labelme":
-                    QMessageBox.warning(
-                        self,
-                        "錯誤",
-                        "單向轉換模式僅支持從 Labelme 格式轉換。",
-                    )
-                    return
-                self._convert_labelme_to_yolo_and_mask(input_dir, output_dir)
-            else:  # 自動轉換：輸入格式 → 三種格式
-                self._convert_to_all_formats(input_dir, output_dir, input_format)
-            
-            QMessageBox.information(
-                self,
-                "成功",
-                "轉換完成！",
-            )
+        self.status_text.append("開始轉換...（背景執行，視窗可正常操作）")
+
+        self._conversion_worker = _ConversionWorker(
+            input_dir=input_dir,
+            output_dir=output_dir,
+            input_format=input_format,
+            conversion_mode=conversion_mode,
+            yolo_seg=yolo_seg,
+            val_size=val_size,
+        )
+        self._conversion_worker.progress_message.connect(self.status_text.append)
+        self._conversion_worker.progress_value.connect(self.progress_bar.setValue)
+        self._conversion_worker.finished_result.connect(self._on_conversion_finished)
+
+        self.convert_btn.setEnabled(False)
+        self._conversion_worker.start()
+
+    def _on_conversion_finished(self, success: bool, message: str) -> None:
+        """轉換結束時由 worker 信號觸發，在主線程更新 UI"""
+        self.progress_bar.setValue(100)
+        self._conversion_worker = None
+        self.convert_btn.setEnabled(True)
+        if success:
             self.status_text.append("\n轉換完成！")
-            self.progress_bar.setValue(100)
-        except Exception as e:
-            error_msg = f"轉換過程中發生錯誤：{str(e)}"
-            logger.error(error_msg, exc_info=True)
-            QMessageBox.critical(self, "錯誤", error_msg)
-            self.status_text.append(f"\n錯誤：{error_msg}")
+            QMessageBox.information(self, "成功", "轉換完成！")
+        else:
+            self.status_text.append(f"\n錯誤：{message}")
+            QMessageBox.critical(self, "錯誤", f"轉換過程中發生錯誤：\n\n{message}")
 
     def _convert_labelme_to_yolo_and_mask(self, input_dir: str, output_dir: str) -> None:
         """從 Labelme 轉換成 YOLO 和 Mask"""

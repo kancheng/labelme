@@ -84,7 +84,10 @@ def yolo2labelme(data, out=None, skip=False):
             if is_image_file(img_file):
                 txt_file = img_filename_to_ext(img_file.replace('images','labels'), '.txt')
                 if os.path.exists(txt_file):
-                    yolo2labelme_single(txt_file, img_file, class_labels, out)
+                    try:
+                        yolo2labelme_single(txt_file, img_file, class_labels, out)
+                    except Exception as e:
+                        print(f'跳過 {filename}：{e}')
                 else:
                     if skip == False:
                         raise FileNotFoundError(f"{txt_file} is expected to exist."

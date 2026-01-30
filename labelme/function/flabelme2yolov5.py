@@ -87,37 +87,40 @@ class Labelme2YOLO(object):
         for target_dir, json_names in zip(('train/', 'val/'), 
                                           (train_json_names, val_json_names)):
             for json_name in json_names:
-                json_path = os.path.join(self._json_dir, json_name)
-                json_data = json.load(open(json_path))
-                
-                print('Converting %s for %s ...' % (json_name, target_dir.replace('/', '')))
-                
-                img_path = self._save_yolo_image(json_data, 
-                                                 json_name, 
-                                                 self._image_dir_path, 
-                                                 target_dir)
-                    
-                yolo_obj_list = self._get_yolo_object_list(json_data, img_path)
-                self._save_yolo_label(json_name, 
-                                      self._label_dir_path, 
-                                      target_dir, 
-                                      yolo_obj_list)
+                try:
+                    json_path = os.path.join(self._json_dir, json_name)
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        json_data = json.load(f)
+                    print('Converting %s for %s ...' % (json_name, target_dir.replace('/', '')))
+                    img_path = self._save_yolo_image(json_data, 
+                                                     json_name, 
+                                                     self._image_dir_path, 
+                                                     target_dir)
+                    yolo_obj_list = self._get_yolo_object_list(json_data, img_path)
+                    self._save_yolo_label(json_name, 
+                                          self._label_dir_path, 
+                                          target_dir, 
+                                          yolo_obj_list)
+                except Exception as e:
+                    print('跳過 %s：%s' % (json_name, e))
         
         print('Generating dataset.yaml file ...')
         self._save_dataset_yaml()
                 
     def convert_one(self, json_name):
-        json_path = os.path.join(self._json_dir, json_name)
-        json_data = json.load(open(json_path))
-        
-        print('Converting %s ...' % json_name)
-        
-        img_path = self._save_yolo_image(json_data, json_name, 
-                                         self._json_dir, '')
-        
-        yolo_obj_list = self._get_yolo_object_list(json_data, img_path)
-        self._save_yolo_label(json_name, self._json_dir, 
-                              '', yolo_obj_list)
+        try:
+            json_path = os.path.join(self._json_dir, json_name)
+            with open(json_path, 'r', encoding='utf-8') as f:
+                json_data = json.load(f)
+            print('Converting %s ...' % json_name)
+            img_path = self._save_yolo_image(json_data, json_name, 
+                                             self._json_dir, '')
+            yolo_obj_list = self._get_yolo_object_list(json_data, img_path)
+            self._save_yolo_label(json_name, self._json_dir, 
+                                  '', yolo_obj_list)
+        except Exception as e:
+            print('跳過 %s：%s' % (json_name, e))
+            raise
     
     def _get_yolo_object_list(self, json_data, img_path):
         yolo_obj_list = []

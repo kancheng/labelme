@@ -130,9 +130,15 @@ def yolo2masks(txt, img, out):
             pimg_val_imgs.append(filename)
 
     for filename in pimg_train_imgs:
-        copy(pimg_train + filename, pout_images + "train/" + filename)
+        try:
+            copy(pimg_train + filename, pout_images + "train/" + filename)
+        except Exception as e:
+            print(f"跳過複製 train {filename}：{e}")
     for filename in pimg_val_imgs:
-        copy(pimg_val + filename, pout_images + "val/" + filename)
+        try:
+            copy(pimg_val + filename, pout_images + "val/" + filename)
+        except Exception as e:
+            print(f"跳過複製 val {filename}：{e}")
 
     ptxt_check=inter(ptxt_train_txts, ptxt_val_txts)
     if ptxt_check:
@@ -142,20 +148,26 @@ def yolo2masks(txt, img, out):
         print("TXT Check Empty")
 
     for num in range(len(pimg_train_imgs)):
-        img_path_train = pimg_train + pimg_train_imgs[num]
-        print("img_path_train : ",img_path_train )
-        txt_path_train = ptxt_train + ptxt_train_txts[num]
-        print("txt_path_train : ",txt_path_train )
-        mask_out_path = pout_mask + "train/"+ pimg_train_imgs[num]
-        print("mask_out_path : ",mask_out_path)
-        yolo2maskdir(img_path_train, txt_path_train,mask_out_path)
+        try:
+            img_path_train = pimg_train + pimg_train_imgs[num]
+            print("img_path_train : ", img_path_train)
+            txt_path_train = ptxt_train + ptxt_train_txts[num]
+            print("txt_path_train : ", txt_path_train)
+            mask_out_path = pout_mask + "train/" + pimg_train_imgs[num]
+            print("mask_out_path : ", mask_out_path)
+            yolo2maskdir(img_path_train, txt_path_train, mask_out_path)
+        except Exception as e:
+            print(f"跳過 train {pimg_train_imgs[num]}：{e}")
 
     for num in range(len(pimg_val_imgs)):
-        img_path_val = pimg_val + pimg_val_imgs[num]
-        print("img_path_val : ",img_path_val )
-        txt_path_val = ptxt_val + pimg_val_txts[num]
-        print("txt_path_val : ",txt_path_val)
-        mask_out_path = pout_mask + "val/"+ pimg_val_imgs[num]
-        print("mask_out_path : ",mask_out_path)
-        yolo2maskdir(img_path_val, txt_path_val, mask_out_path)
+        try:
+            img_path_val = pimg_val + pimg_val_imgs[num]
+            print("img_path_val : ", img_path_val)
+            txt_path_val = ptxt_val + pimg_val_txts[num]
+            print("txt_path_val : ", txt_path_val)
+            mask_out_path = pout_mask + "val/" + pimg_val_imgs[num]
+            print("mask_out_path : ", mask_out_path)
+            yolo2maskdir(img_path_val, txt_path_val, mask_out_path)
+        except Exception as e:
+            print(f"跳過 val {pimg_val_imgs[num]}：{e}")
 
