@@ -235,6 +235,35 @@ def main():
         else:
             output_dir = output
 
+    # Fix Qt platform plugin issue with OpenCV
+    # OpenCV's Qt plugins can conflict with system Qt plugins on Linux
+    # This ensures we use PyQt5's plugins instead of OpenCV's
+    if sys.platform == "linux":
+        try:
+            import PyQt5
+            pyqt5_path = osp.dirname(PyQt5.__file__)
+            qt_plugin_path = osp.join(pyqt5_path, "Qt5", "plugins")
+            if osp.exists(qt_plugin_path):
+                # Set the plugin path to PyQt5's plugins
+                os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = qt_plugin_path
+                logger.debug(f"Set QT_QPA_PLATFORM_PLUGIN_PATH to {qt_plugin_path}")
+        except (ImportError, AttributeError) as e:
+            logger.debug(f"Could not set Qt plugin path: {e}")
+        
+        # Remove OpenCV's Qt plugin path from QT_PLUGIN_PATH if present
+        if "QT_PLUGIN_PATH" in os.environ:
+            plugin_paths = os.environ["QT_PLUGIN_PATH"].split(os.pathsep)
+            # Filter out OpenCV's plugin path
+            filtered_paths = [
+                p for p in plugin_paths
+                if "cv2" not in p.lower() and "opencv" not in p.lower()
+            ]
+            if filtered_paths:
+                os.environ["QT_PLUGIN_PATH"] = os.pathsep.join(filtered_paths)
+                logger.debug(f"Filtered QT_PLUGIN_PATH: {os.environ['QT_PLUGIN_PATH']}")
+            else:
+                os.environ.pop("QT_PLUGIN_PATH", None)
+
     translator = QtCore.QTranslator()
     translator.load(
         QtCore.QLocale.system().name(),
