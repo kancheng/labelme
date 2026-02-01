@@ -10,7 +10,7 @@ import re
 import sys
 import types
 import webbrowser
-from typing import Literal
+from typing import Literal, Optional
 
 import imgviz
 import natsort
@@ -97,29 +97,38 @@ class _TrainingWorker(QtCore.QThread):
         dataset_yaml: str,
         output_dir: str,
         python_path: str,
-        is_v8: bool,
+        yolo_version: str,  # "v8", "v11", "v26", "v5"
         epochs: int,
         imgsz: int,
         batch: int,
         device: str,
         project_name: str,
         model_size: str,
+        model_dir: Optional[str] = None,  # 預訓練模型目錄（v8/v11/v26 使用）
+        task: str = "detect",  # "detect" | "segment"
     ):
         super().__init__()
         self._dataset_yaml = dataset_yaml
         self._output_dir = output_dir
         self._python_path = python_path
-        self._is_v8 = is_v8
+        self._yolo_version = yolo_version
         self._epochs = epochs
         self._imgsz = imgsz
         self._batch = batch
         self._device = device
         self._project_name = project_name
         self._model_size = model_size
+        self._model_dir = model_dir
+        self._task = task
 
     def run(self) -> None:
         try:
-            from labelme.function.ftrain_yolo import train_yolo_v8, train_yolo_v5
+            from labelme.function.ftrain_yolo import (
+                train_yolo_v5,
+                train_yolo_v8,
+                train_yolo_v11,
+                train_yolo_v26,
+            )
 
             def on_progress(msg: str) -> None:
                 self.progress_message.emit(msg)
@@ -137,35 +146,70 @@ class _TrainingWorker(QtCore.QThread):
                     except Exception:
                         pass
 
-            if self._is_v8:
-                success, message = train_yolo_v8(
-                    dataset_yaml=self._dataset_yaml,
-                    output_dir=self._output_dir,
-                    python_path=self._python_path,
-                    epochs=self._epochs,
-                    imgsz=self._imgsz,
-                    batch=self._batch,
-                    device=self._device,
-                    project_name=self._project_name,
-                    model_size=self._model_size,
-                    progress_callback=on_progress,
-                )
+            train_kw = dict(
+                dataset_yaml=self._dataset_yaml,
+                output_dir=self._output_dir,
+                python_path=self._python_path,
+                epochs=self._epochs,
+                imgsz=self._imgsz,
+                batch=self._batch,
+                device=self._device,
+                project_name=self._project_name,
+                model_size=self._model_size,
+                progress_callback=on_progress,
+            )
+            train_kw["model_dir"] = self._model_dir or None
+            train_kw["task"] = self._task
+            if self._yolo_version == "v8":
+                success, message = train_yolo_v8(**train_kw)
+            elif self._yolo_version == "v11":
+                success, message = train_yolo_v11(**train_kw)
+            elif self._yolo_version == "v26":
+                success, message = train_yolo_v26(**train_kw)
             else:
-                success, message = train_yolo_v5(
-                    dataset_yaml=self._dataset_yaml,
-                    output_dir=self._output_dir,
-                    python_path=self._python_path,
-                    epochs=self._epochs,
-                    imgsz=self._imgsz,
-                    batch=self._batch,
-                    device=self._device,
-                    project_name=self._project_name,
-                    model_size=self._model_size,
-                    progress_callback=on_progress,
-                )
+                success, message = train_yolo_v5(**train_kw)
             self.finished_result.emit(success, message)
         except Exception as e:
             logger.error("Training worker error: %s", e, exc_info=True)
+            self.finished_result.emit(False, str(e))
+
+
+class _DownloadWorker(QtCore.QThread):
+    """背景下載預訓練模型，避免阻塞 GUI"""
+    progress_message = QtCore.pyqtSignal(str)
+    finished_result = QtCore.pyqtSignal(bool, str)  # success, message
+
+    def __init__(
+        self,
+        *,
+        model_dir: str,
+        model_prefix: str,
+        model_size: str,
+        task: str = "detect",
+    ):
+        super().__init__()
+        self._model_dir = model_dir
+        self._model_prefix = model_prefix
+        self._model_size = model_size
+        self._task = task
+
+    def run(self) -> None:
+        try:
+            from labelme.function.ftrain_yolo import download_yolo_pretrained
+
+            def on_progress(msg: str) -> None:
+                self.progress_message.emit(msg)
+
+            success, message = download_yolo_pretrained(
+                model_dir=self._model_dir,
+                model_prefix=self._model_prefix,
+                model_size=self._model_size,
+                task=self._task,
+                progress_callback=on_progress,
+            )
+            self.finished_result.emit(success, message)
+        except Exception as e:
+            logger.error("Download worker error: %s", e, exc_info=True)
             self.finished_result.emit(False, str(e))
 
 
@@ -3769,7 +3813,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # YOLO 版本選擇
         training_params_layout.addWidget(QtWidgets.QLabel("YOLO 版本:"), 0, 0)
         self.yolo_version_combo = QtWidgets.QComboBox()
-        self.yolo_version_combo.addItems(["YOLOv8 (Ultralytics)", "YOLOv5"])
+        self.yolo_version_combo.addItems([
+            "YOLOv8 (Ultralytics)",
+            "YOLOv11 (Ultralytics)",
+            "YOLOv26 (Ultralytics)",
+            "YOLOv5",
+        ])
         training_params_layout.addWidget(self.yolo_version_combo, 0, 1)
         
         # 模型大小
@@ -3779,38 +3828,78 @@ class MainWindow(QtWidgets.QMainWindow):
         self.model_size_combo.setCurrentIndex(0)
         training_params_layout.addWidget(self.model_size_combo, 0, 3)
         
+        # 任務類型（檢測 / 分割）
+        training_params_layout.addWidget(QtWidgets.QLabel("任務類型:"), 1, 0)
+        self.yolo_task_combo = QtWidgets.QComboBox()
+        self.yolo_task_combo.addItems(["檢測 (Detection)", "分割 (Segmentation)"])
+        self.yolo_task_combo.setToolTip("檢測：邊框偵測；分割：實例分割（需對應標註格式）")
+        training_params_layout.addWidget(self.yolo_task_combo, 1, 1)
+        
         # 訓練輪數
-        training_params_layout.addWidget(QtWidgets.QLabel("訓練輪數 (Epochs):"), 1, 0)
+        training_params_layout.addWidget(QtWidgets.QLabel("訓練輪數 (Epochs):"), 2, 0)
         self.epochs_spinbox = QtWidgets.QSpinBox()
         self.epochs_spinbox.setMinimum(1)
         self.epochs_spinbox.setMaximum(1000)
         self.epochs_spinbox.setValue(100)
-        training_params_layout.addWidget(self.epochs_spinbox, 1, 1)
+        training_params_layout.addWidget(self.epochs_spinbox, 2, 1)
         
         # 圖像大小
-        training_params_layout.addWidget(QtWidgets.QLabel("圖像大小 (Image Size):"), 1, 2)
+        training_params_layout.addWidget(QtWidgets.QLabel("圖像大小 (Image Size):"), 2, 2)
         self.imgsz_spinbox = QtWidgets.QSpinBox()
         self.imgsz_spinbox.setMinimum(320)
         self.imgsz_spinbox.setMaximum(1280)
         self.imgsz_spinbox.setSingleStep(32)
         self.imgsz_spinbox.setValue(640)
-        training_params_layout.addWidget(self.imgsz_spinbox, 1, 3)
+        training_params_layout.addWidget(self.imgsz_spinbox, 2, 3)
         
         # 批次大小
-        training_params_layout.addWidget(QtWidgets.QLabel("批次大小 (Batch Size):"), 2, 0)
+        training_params_layout.addWidget(QtWidgets.QLabel("批次大小 (Batch Size):"), 3, 0)
         self.batch_spinbox = QtWidgets.QSpinBox()
         self.batch_spinbox.setMinimum(1)
         self.batch_spinbox.setMaximum(128)
         self.batch_spinbox.setValue(16)
-        training_params_layout.addWidget(self.batch_spinbox, 2, 1)
+        training_params_layout.addWidget(self.batch_spinbox, 3, 1)
         
         # 設備選擇
-        training_params_layout.addWidget(QtWidgets.QLabel("設備 (Device):"), 2, 2)
+        training_params_layout.addWidget(QtWidgets.QLabel("設備 (Device):"), 3, 2)
         self.device_combo = QtWidgets.QComboBox()
         self.device_combo.addItems(["自動檢測", "CPU", "GPU 0", "GPU 1", "GPU 2", "GPU 3"])
-        training_params_layout.addWidget(self.device_combo, 2, 3)
+        training_params_layout.addWidget(self.device_combo, 3, 3)
         
         layout.addWidget(training_params_group)
+
+        # 預訓練模型目錄（離線訓練用：先下載到指定目錄，之後訓練不連網）
+        pretrained_group = QtWidgets.QGroupBox("預訓練模型 / Pretrained Models（離線可用）")
+        pretrained_layout = QtWidgets.QVBoxLayout()
+        pretrained_group.setLayout(pretrained_layout)
+        model_dir_layout = QtWidgets.QHBoxLayout()
+        model_dir_layout.addWidget(QtWidgets.QLabel("預訓練模型目錄:"))
+        self.pretrained_model_dir_line = QtWidgets.QLineEdit()
+        self.pretrained_model_dir_line.setPlaceholderText("選擇目錄存放 yolov8n.pt 等，訓練前會先檢查此目錄")
+        saved_model_dir = self.settings.value("training/model_dir", "")
+        if saved_model_dir:
+            self.pretrained_model_dir_line.setText(saved_model_dir)
+        model_dir_layout.addWidget(self.pretrained_model_dir_line)
+        model_dir_browse_btn = QtWidgets.QPushButton("瀏覽...")
+        model_dir_browse_btn.clicked.connect(self._select_pretrained_model_directory)
+        model_dir_layout.addWidget(model_dir_browse_btn)
+        pretrained_layout.addLayout(model_dir_layout)
+        self.pretrained_model_status_label = QtWidgets.QLabel("本機模型: —")
+        self.pretrained_model_status_label.setStyleSheet("color: #666; font-size: 11px;")
+        pretrained_layout.addWidget(self.pretrained_model_status_label)
+        download_model_btn = QtWidgets.QPushButton("下載目前選擇的模型（需連網）")
+        download_model_btn.setStyleSheet(
+            "QPushButton { background-color: #2196F3; color: white; padding: 8px; }"
+            "QPushButton:hover { background-color: #1976D2; }"
+        )
+        download_model_btn.clicked.connect(self._download_pretrained_model)
+        pretrained_layout.addWidget(download_model_btn)
+        layout.addWidget(pretrained_group)
+        self.yolo_version_combo.currentTextChanged.connect(self._update_pretrained_model_status)
+        self.model_size_combo.currentTextChanged.connect(self._update_pretrained_model_status)
+        self.yolo_task_combo.currentTextChanged.connect(self._update_pretrained_model_status)
+        self.pretrained_model_dir_line.textChanged.connect(self._update_pretrained_model_status)
+        self._update_pretrained_model_status()
 
         # 輸出目錄設定
         output_group = QtWidgets.QGroupBox("輸出設定 / Output Settings")
@@ -3827,15 +3916,16 @@ class MainWindow(QtWidgets.QMainWindow):
         output_path_layout.addWidget(output_browse_btn)
         output_layout.addLayout(output_path_layout)
         
-        # 專案名稱
+        # 專案名稱（預設依任務類型：檢測 → yolo_training_detection，分割 → yolo_training_segmentation）
         project_name_layout = QtWidgets.QHBoxLayout()
         project_name_layout.addWidget(QtWidgets.QLabel("專案名稱:"))
         self.project_name_line = QtWidgets.QLineEdit()
-        self.project_name_line.setPlaceholderText("yolov8_training")
-        self.project_name_line.setText("yolov8_training")
+        self.project_name_line.setPlaceholderText("yolo_training_detection")
+        self.project_name_line.setText("yolo_training_detection")
         project_name_layout.addWidget(self.project_name_line)
         project_name_layout.addStretch()
         output_layout.addLayout(project_name_layout)
+        self.yolo_task_combo.currentTextChanged.connect(self._sync_project_name_to_task)
         
         layout.addWidget(output_group)
 
@@ -4357,6 +4447,138 @@ class MainWindow(QtWidgets.QMainWindow):
         if directory:
             self.training_output_dir_line.setText(directory)
 
+    def _select_pretrained_model_directory(self) -> None:
+        """選擇預訓練模型存放目錄"""
+        directory = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "選擇預訓練模型目錄",
+            self.pretrained_model_dir_line.text().strip() or "",
+            QtWidgets.QFileDialog.ShowDirsOnly | QtWidgets.QFileDialog.DontResolveSymlinks,
+        )
+        if directory:
+            self.pretrained_model_dir_line.setText(directory)
+            self.settings.setValue("training/model_dir", directory)
+            self._update_pretrained_model_status()
+
+    def _sync_project_name_to_task(self) -> None:
+        """切換任務類型時，若專案名稱是預設的 _detection / _segmentation，則同步為新預設"""
+        current = self.project_name_line.text().strip()
+        new_default = "yolo_training_segmentation" if self.yolo_task_combo.currentText() == "分割 (Segmentation)" else "yolo_training_detection"
+        if current in ("yolo_training_detection", "yolo_training_segmentation"):
+            self.project_name_line.setText(new_default)
+
+    def _update_pretrained_model_status(self) -> None:
+        """根據目前版本、大小、目錄更新「本機模型」狀態標籤"""
+        yolo_version_text = self.yolo_version_combo.currentText()
+        version_map = {
+            "YOLOv8 (Ultralytics)": "v8",
+            "YOLOv11 (Ultralytics)": "v11",
+            "YOLOv26 (Ultralytics)": "v26",
+            "YOLOv5": "v5",
+        }
+        ver = version_map.get(yolo_version_text, "v8")
+        if ver == "v5":
+            self.pretrained_model_status_label.setText("YOLOv5 請自行準備權重")
+            return
+        prefix_map = {"v8": "yolov8", "v11": "yolo11", "v26": "yolo26"}
+        model_prefix = prefix_map.get(ver, "yolov8")
+        size_map = {
+            "nano (n)": "n",
+            "small (s)": "s",
+            "medium (m)": "m",
+            "large (l)": "l",
+            "xlarge (x)": "x",
+        }
+        model_size = size_map.get(self.model_size_combo.currentText(), "n")
+        task = "segment" if self.yolo_task_combo.currentText() == "分割 (Segmentation)" else "detect"
+        model_dir = self.pretrained_model_dir_line.text().strip() or None
+        try:
+            from labelme.function.ftrain_yolo import get_pretrained_model_path
+            path_or_name, is_local = get_pretrained_model_path(
+                model_dir, model_prefix, model_size, task=task
+            )
+            if is_local:
+                self.pretrained_model_status_label.setText(
+                    f"本機模型: 已找到 {os.path.basename(path_or_name)}"
+                )
+                self.pretrained_model_status_label.setStyleSheet(
+                    "color: #4caf50; font-size: 11px;"
+                )
+            else:
+                self.pretrained_model_status_label.setText(
+                    "未找到（訓練時將從網路下載）"
+                )
+                self.pretrained_model_status_label.setStyleSheet(
+                    "color: #666; font-size: 11px;"
+                )
+        except Exception:
+            self.pretrained_model_status_label.setText("本機模型: —")
+            self.pretrained_model_status_label.setStyleSheet(
+                "color: #666; font-size: 11px;"
+            )
+
+    def _download_pretrained_model(self) -> None:
+        """在背景下載目前選擇的預訓練模型到指定目錄"""
+        model_dir = self.pretrained_model_dir_line.text().strip()
+        if not model_dir:
+            QMessageBox.warning(
+                self,
+                "提示",
+                "請先選擇「預訓練模型目錄」再下載。",
+            )
+            return
+        yolo_version_text = self.yolo_version_combo.currentText()
+        version_map = {
+            "YOLOv8 (Ultralytics)": "v8",
+            "YOLOv11 (Ultralytics)": "v11",
+            "YOLOv26 (Ultralytics)": "v26",
+            "YOLOv5": "v5",
+        }
+        ver = version_map.get(yolo_version_text, "v8")
+        if ver == "v5":
+            QMessageBox.information(
+                self,
+                "提示",
+                "YOLOv5 預訓練權重請自行準備，此處僅支援 YOLOv8 / v11 / v26 下載。",
+            )
+            return
+        prefix_map = {"v8": "yolov8", "v11": "yolo11", "v26": "yolo26"}
+        model_prefix = prefix_map.get(ver, "yolov8")
+        size_map = {
+            "nano (n)": "n",
+            "small (s)": "s",
+            "medium (m)": "m",
+            "large (l)": "l",
+            "xlarge (x)": "x",
+        }
+        model_size = size_map.get(self.model_size_combo.currentText(), "n")
+        task = "segment" if self.yolo_task_combo.currentText() == "分割 (Segmentation)" else "detect"
+        if getattr(self, "_download_worker", None) is not None and self._download_worker.isRunning():
+            QMessageBox.warning(self, "提示", "正在下載中，請稍候。")
+            return
+        self.training_status_text.clear()
+        self.training_status_text.append("開始下載預訓練模型（需連網）...")
+        self._download_worker = _DownloadWorker(
+            model_dir=model_dir,
+            model_prefix=model_prefix,
+            model_size=model_size,
+            task=task,
+        )
+        self._download_worker.progress_message.connect(self.training_status_text.append)
+        self._download_worker.finished_result.connect(self._on_download_finished)
+        self._download_worker.start()
+
+    def _on_download_finished(self, success: bool, message: str) -> None:
+        """下載結束時更新狀態並釋放 worker"""
+        self._download_worker = None
+        self._update_pretrained_model_status()
+        if success:
+            self.training_status_text.append(f"✅ {message}")
+            QMessageBox.information(self, "下載完成", message)
+        else:
+            self.training_status_text.append(f"❌ {message}")
+            QMessageBox.critical(self, "下載失敗", message)
+
     def _check_dataset(self) -> None:
         """檢查 YOLO 數據集"""
         dataset_path = self.dataset_path_line.text().strip()
@@ -4448,9 +4670,15 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         
         # 獲取訓練參數
-        yolo_version = self.yolo_version_combo.currentText()
-        is_v8 = "v8" in yolo_version.lower()
-        
+        yolo_version_text = self.yolo_version_combo.currentText()
+        version_map = {
+            "YOLOv8 (Ultralytics)": "v8",
+            "YOLOv11 (Ultralytics)": "v11",
+            "YOLOv26 (Ultralytics)": "v26",
+            "YOLOv5": "v5",
+        }
+        yolo_version_str = version_map.get(yolo_version_text, "v8")
+
         model_size_map = {
             "nano (n)": "n",
             "small (s)": "s",
@@ -4459,11 +4687,11 @@ class MainWindow(QtWidgets.QMainWindow):
             "xlarge (x)": "x"
         }
         model_size = model_size_map[self.model_size_combo.currentText()]
-        
+
         epochs = self.epochs_spinbox.value()
         imgsz = self.imgsz_spinbox.value()
         batch = self.batch_spinbox.value()
-        
+
         device_map = {
             "自動檢測": "0",
             "CPU": "cpu",
@@ -4473,15 +4701,17 @@ class MainWindow(QtWidgets.QMainWindow):
             "GPU 3": "3"
         }
         device = device_map[self.device_combo.currentText()]
-        
+
+        task = "segment" if self.yolo_task_combo.currentText() == "分割 (Segmentation)" else "detect"
+        task_label = "分割 (Segmentation)" if task == "segment" else "檢測 (Detection)"
         project_name = self.project_name_line.text().strip()
         if not project_name:
-            project_name = "yolov8_training" if is_v8 else "yolov5_training"
-        
+            project_name = "yolo_training_segmentation" if task == "segment" else "yolo_training_detection"
         # 確認對話框
         confirm_msg = (
             f"確認開始訓練？\n\n"
-            f"YOLO 版本: {yolo_version}\n"
+            f"YOLO 版本: {yolo_version_text}\n"
+            f"任務類型: {task_label}\n"
             f"模型大小: {model_size}\n"
             f"訓練輪數: {epochs}\n"
             f"圖像大小: {imgsz}\n"
@@ -4509,7 +4739,6 @@ class MainWindow(QtWidgets.QMainWindow):
         from labelme.function.ftrain_yolo import check_yolo_installation
 
         # 檢查 YOLO 安裝（主線程快速檢查）
-        yolo_version_str = "v8" if is_v8 else "v5"
         is_installed, install_msg = check_yolo_installation(saved_env_path, yolo_version_str)
         if not is_installed:
             self.training_status_text.append(f"⚠️ {install_msg}")
@@ -4534,18 +4763,25 @@ class MainWindow(QtWidgets.QMainWindow):
         self.training_status_text.append("\n開始訓練...（背景執行，視窗可正常操作）")
         self.training_progress_bar.setValue(5)
 
+        # 預訓練模型目錄（v8/v11/v26 使用），並儲存設定
+        model_dir = self.pretrained_model_dir_line.text().strip() or None
+        if model_dir:
+            self.settings.setValue("training/model_dir", model_dir)
+
         # 建立背景訓練 worker
         self._training_worker = _TrainingWorker(
             dataset_yaml=dataset_yaml,
             output_dir=output_dir,
             python_path=saved_env_path,
-            is_v8=is_v8,
+            yolo_version=yolo_version_str,
             epochs=epochs,
             imgsz=imgsz,
             batch=batch,
             device=device,
             project_name=project_name,
             model_size=model_size,
+            model_dir=model_dir,
+            task=task,
         )
         self._training_worker.progress_message.connect(self.training_status_text.append)
         self._training_worker.progress_value.connect(self.training_progress_bar.setValue)
