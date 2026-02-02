@@ -85,6 +85,58 @@ _AI_TEXT_TO_ANNOTATION_CREATE_MODE_TO_SHAPE_TYPE: dict[
 }
 
 
+class _CollapsibleSection(QtWidgets.QWidget):
+    """可收合區塊：收合時只顯示橫條，點擊橫條展開/收合內容"""
+
+    def __init__(self, title: str, parent: Optional[QtWidgets.QWidget] = None):
+        super().__init__(parent)
+        self._expanded = False  # 預設收合
+        self._title = title
+        self._content = QtWidgets.QWidget()
+        self._content.setVisible(False)
+        self._content_layout = QtWidgets.QVBoxLayout(self._content)
+        self._content_layout.setContentsMargins(12, 8, 12, 12)
+        self._content_layout.setSpacing(8)
+        self._header_btn = QtWidgets.QPushButton(title)
+        self._header_btn.setCheckable(True)
+        self._header_btn.setChecked(False)
+        self._header_btn.setFlat(True)
+        self._header_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self._header_btn.setStyleSheet(
+            "QPushButton { text-align: left; padding: 10px 12px; font-weight: bold; "
+            "background-color: #f0f0f0; border: 1px solid #ddd; border-radius: 4px; }"
+            "QPushButton:hover { background-color: #e5e5e5; }"
+            "QPushButton:checked { background-color: #e0e0e0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }"
+        )
+        self._header_btn.clicked.connect(self._toggle)
+        self._update_header_text()
+        main = QtWidgets.QVBoxLayout(self)
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(0)
+        main.addWidget(self._header_btn)
+        main.addWidget(self._content)
+
+    def _update_header_text(self) -> None:
+        arrow = "▼" if self._expanded else "▶"
+        self._header_btn.setText(f"  {arrow}  {self._title}")
+
+    def _toggle(self) -> None:
+        self._expanded = self._header_btn.isChecked()
+        self._content.setVisible(self._expanded)
+        self._update_header_text()
+
+    def content_layout(self) -> QtWidgets.QVBoxLayout:
+        return self._content_layout
+
+    def set_expanded(self, expanded: bool) -> None:
+        if self._expanded == expanded:
+            return
+        self._expanded = expanded
+        self._content.setVisible(self._expanded)
+        self._header_btn.setChecked(self._expanded)
+        self._update_header_text()
+
+
 class _TrainingWorker(QtCore.QThread):
     """背景執行 YOLO 訓練，避免阻塞 GUI"""
     progress_message = QtCore.pyqtSignal(str)
@@ -3722,11 +3774,10 @@ class MainWindow(QtWidgets.QMainWindow):
         title.setFont(title_font)
         layout.addWidget(title)
 
-        # Python 環境信息區域
-        env_info_group = QtWidgets.QGroupBox("訓練環境設定")
-        env_info_layout = QtWidgets.QVBoxLayout()
+        # Python 環境信息區域（可收合）
+        env_section = _CollapsibleSection("訓練環境設定")
+        env_info_layout = env_section.content_layout()
         env_info_layout.setSpacing(10)
-        env_info_group.setLayout(env_info_layout)
 
         # 顯示當前選中的 Python 環境
         saved_env_path = self.settings.value("training/python_path", "")
@@ -3770,12 +3821,11 @@ class MainWindow(QtWidgets.QMainWindow):
             go_button.clicked.connect(lambda: self.tab_widget.setCurrentIndex(0))
             env_info_layout.addWidget(go_button)
 
-        layout.addWidget(env_info_group)
+        layout.addWidget(env_section)
 
-        # 數據集設定區域
-        dataset_group = QtWidgets.QGroupBox("數據集設定 / Dataset Settings")
-        dataset_layout = QtWidgets.QVBoxLayout()
-        dataset_group.setLayout(dataset_layout)
+        # 數據集設定區域（可收合）
+        dataset_section = _CollapsibleSection("數據集設定 / Dataset Settings")
+        dataset_layout = dataset_section.content_layout()
         
         # 數據集路徑選擇
         dataset_path_layout = QtWidgets.QHBoxLayout()
@@ -3803,12 +3853,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dataset_info_text.setPlaceholderText("數據集資訊將顯示在這裡...")
         dataset_layout.addWidget(self.dataset_info_text)
         
-        layout.addWidget(dataset_group)
+        layout.addWidget(dataset_section)
 
-        # 訓練參數設定區域
-        training_params_group = QtWidgets.QGroupBox("訓練參數設定 / Training Parameters")
-        training_params_layout = QtWidgets.QGridLayout()
-        training_params_group.setLayout(training_params_layout)
+        # 訓練參數設定區域（可收合）
+        training_params_section = _CollapsibleSection("訓練參數設定 / Training Parameters")
+        training_params_content = QtWidgets.QWidget()
+        training_params_layout = QtWidgets.QGridLayout(training_params_content)
+        training_params_section.content_layout().addWidget(training_params_content)
         
         # YOLO 版本選擇
         training_params_layout.addWidget(QtWidgets.QLabel("YOLO 版本:"), 0, 0)
@@ -3866,12 +3917,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.device_combo.addItems(["自動檢測", "CPU", "GPU 0", "GPU 1", "GPU 2", "GPU 3"])
         training_params_layout.addWidget(self.device_combo, 3, 3)
         
-        layout.addWidget(training_params_group)
+        layout.addWidget(training_params_section)
 
-        # 預訓練模型目錄（離線訓練用：先下載到指定目錄，之後訓練不連網）
-        pretrained_group = QtWidgets.QGroupBox("預訓練模型 / Pretrained Models（離線可用）")
-        pretrained_layout = QtWidgets.QVBoxLayout()
-        pretrained_group.setLayout(pretrained_layout)
+        # 預訓練模型目錄（離線訓練用：可收合）
+        pretrained_section = _CollapsibleSection("預訓練模型 / Pretrained Models（離線可用）")
+        pretrained_layout = pretrained_section.content_layout()
         model_dir_layout = QtWidgets.QHBoxLayout()
         model_dir_layout.addWidget(QtWidgets.QLabel("預訓練模型目錄:"))
         self.pretrained_model_dir_line = QtWidgets.QLineEdit()
@@ -3894,17 +3944,16 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         download_model_btn.clicked.connect(self._download_pretrained_model)
         pretrained_layout.addWidget(download_model_btn)
-        layout.addWidget(pretrained_group)
+        layout.addWidget(pretrained_section)
         self.yolo_version_combo.currentTextChanged.connect(self._update_pretrained_model_status)
         self.model_size_combo.currentTextChanged.connect(self._update_pretrained_model_status)
         self.yolo_task_combo.currentTextChanged.connect(self._update_pretrained_model_status)
         self.pretrained_model_dir_line.textChanged.connect(self._update_pretrained_model_status)
         self._update_pretrained_model_status()
 
-        # 輸出目錄設定
-        output_group = QtWidgets.QGroupBox("輸出設定 / Output Settings")
-        output_layout = QtWidgets.QVBoxLayout()
-        output_group.setLayout(output_layout)
+        # 輸出目錄設定（可收合）
+        output_section = _CollapsibleSection("輸出設定 / Output Settings")
+        output_layout = output_section.content_layout()
         
         output_path_layout = QtWidgets.QHBoxLayout()
         output_path_layout.addWidget(QtWidgets.QLabel("輸出目錄:"))
@@ -3927,12 +3976,11 @@ class MainWindow(QtWidgets.QMainWindow):
         output_layout.addLayout(project_name_layout)
         self.yolo_task_combo.currentTextChanged.connect(self._sync_project_name_to_task)
         
-        layout.addWidget(output_group)
+        layout.addWidget(output_section)
 
-        # 進度顯示區域
-        progress_group = QtWidgets.QGroupBox("訓練進度 / Training Progress")
-        progress_layout = QtWidgets.QVBoxLayout()
-        progress_group.setLayout(progress_layout)
+        # 進度顯示區域（可收合）
+        progress_section = _CollapsibleSection("訓練進度 / Training Progress")
+        progress_layout = progress_section.content_layout()
         
         self.training_progress_bar = QtWidgets.QProgressBar()
         self.training_progress_bar.setMinimum(0)
@@ -3946,7 +3994,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.training_status_text.setPlaceholderText("訓練狀態將顯示在這裡...")
         progress_layout.addWidget(self.training_status_text)
         
-        layout.addWidget(progress_group)
+        layout.addWidget(progress_section)
 
         # 訓練按鈕（保存參考以便訓練時禁用/恢復）
         self.train_btn = QtWidgets.QPushButton("開始訓練")
