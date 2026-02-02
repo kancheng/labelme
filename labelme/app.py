@@ -609,6 +609,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tab_widget.setCurrentIndex(2)
         
         self.setCentralWidget(self.tab_widget)
+        self.installEventFilter(self)
 
         features = QtWidgets.QDockWidget.DockWidgetFeatures()
         for dock in ["flag_dock", "label_dock", "shape_dock", "file_dock"]:
@@ -2324,6 +2325,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def enableSaveImageWithData(self, enabled):
         self._config["store_data"] = enabled
         self.actions.saveWithImageData.setChecked(enabled)
+
+    def eventFilter(self, obj, event):
+        return super().eventFilter(obj, event)
 
     def closeEvent(self, event):
         if not self._can_continue():
@@ -4929,7 +4933,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 "訓練失敗",
                 f"訓練過程中發生錯誤：\n\n{message}"
             )
-
 
     def _select_model_file(self) -> None:
         """選擇 .pt 模型文件"""

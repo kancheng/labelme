@@ -233,6 +233,24 @@ def check_yolo_installation(python_path: str, yolo_version: str = "v8") -> Tuple
             if result.returncode == 0:
                 version = result.stdout.strip()
                 name = {"v8": "YOLOv8", "v11": "YOLOv11", "v26": "YOLOv26"}.get(yolo_version, "YOLO")
+                # YOLOv26 需要較新版本 ultralytics（含 Segment26），否則訓練/載入會 AttributeError
+                if yolo_version == "v26":
+                    check_segment26 = subprocess.run(
+                        [python_path, "-c", (
+                            "from ultralytics.nn.modules import head; "
+                            "v = getattr(head, 'Segment26', None); "
+                            "print('ok' if v is not None else 'missing')"
+                        )],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if check_segment26.returncode != 0 or (check_segment26.stdout or "").strip() != "ok":
+                        return False, (
+                            f"YOLOv26 需要較新版本的 Ultralytics（目前: {version}）。"
+                            "請在訓練環境中執行: pip install -U ultralytics"
+                            " 或改用 YOLOv8 / YOLOv11。"
+                        )
                 return True, f"Ultralytics ({name}) 已安裝: {version}"
             else:
                 return False, f"Ultralytics ({yolo_version.upper()}) 未安裝"
