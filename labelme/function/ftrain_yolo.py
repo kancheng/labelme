@@ -44,7 +44,7 @@ def get_pretrained_model_path(
     if model_dir and os.path.isdir(model_dir):
         local_path = os.path.join(model_dir, filename)
         if os.path.isfile(local_path):
-            return local_path, True
+            return os.path.abspath(local_path), True
     return filename, False
 
 
