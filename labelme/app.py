@@ -3,6 +3,7 @@ from __future__ import annotations
 import enum
 import functools
 import html
+import json
 import math
 import os
 import os.path as osp
@@ -2738,38 +2739,32 @@ class MainWindow(QtWidgets.QMainWindow):
         detect_button.clicked.connect(self._detect_python_environments)
         python_layout.addWidget(detect_button)
         
-        # 顯示已保存的訓練環境（如果存在）
-        saved_env_path = self.settings.value("training/python_path", "")
-        saved_env_name = self.settings.value("training/env_name", "")
-        if saved_env_path:
-            saved_env_frame = QtWidgets.QFrame()
-            saved_env_frame.setFrameStyle(QtWidgets.QFrame.Box)
-            saved_env_frame.setStyleSheet(
-                "QFrame { background-color: #e8f5e9; border: 2px solid #4caf50; "
-                "border-radius: 5px; padding: 10px; margin-top: 10px; }"
-            )
-            saved_env_layout = QtWidgets.QVBoxLayout()
-            saved_env_layout.setSpacing(5)
-            saved_env_frame.setLayout(saved_env_layout)
-            
-            saved_title = QtWidgets.QLabel("💾 已保存的訓練環境")
-            saved_title_font = QtGui.QFont()
-            saved_title_font.setPointSize(11)
-            saved_title_font.setBold(True)
-            saved_title.setFont(saved_title_font)
-            saved_title.setStyleSheet("color: #4caf50;")
-            saved_env_layout.addWidget(saved_title)
-            
-            saved_name_label = QtWidgets.QLabel(f"環境名稱: {saved_env_name}")
-            saved_name_label.setStyleSheet("color: #333333; font-size: 10px;")
-            saved_env_layout.addWidget(saved_name_label)
-            
-            saved_path_label = QtWidgets.QLabel(f"Python 路徑: {saved_env_path}")
-            saved_path_label.setStyleSheet("color: #666666; font-family: monospace; font-size: 9px;")
-            saved_path_label.setWordWrap(True)
-            saved_env_layout.addWidget(saved_path_label)
-            
-            python_layout.addWidget(saved_env_frame)
+        # 已保存的訓練環境區塊（可依保存狀態更新顯示）
+        self.saved_env_frame = QtWidgets.QFrame()
+        self.saved_env_frame.setFrameStyle(QtWidgets.QFrame.Box)
+        self.saved_env_frame.setStyleSheet(
+            "QFrame { background-color: #e8f5e9; border: 2px solid #4caf50; "
+            "border-radius: 5px; padding: 10px; margin-top: 10px; }"
+        )
+        saved_env_layout = QtWidgets.QVBoxLayout()
+        saved_env_layout.setSpacing(5)
+        self.saved_env_frame.setLayout(saved_env_layout)
+        saved_title = QtWidgets.QLabel("💾 已保存的訓練環境")
+        saved_title_font = QtGui.QFont()
+        saved_title_font.setPointSize(11)
+        saved_title_font.setBold(True)
+        saved_title.setFont(saved_title_font)
+        saved_title.setStyleSheet("color: #4caf50;")
+        saved_env_layout.addWidget(saved_title)
+        self.saved_env_name_label = QtWidgets.QLabel("")
+        self.saved_env_name_label.setStyleSheet("color: #333333; font-size: 10px;")
+        saved_env_layout.addWidget(self.saved_env_name_label)
+        self.saved_env_path_label = QtWidgets.QLabel("")
+        self.saved_env_path_label.setStyleSheet("color: #666666; font-family: monospace; font-size: 9px;")
+        self.saved_env_path_label.setWordWrap(True)
+        saved_env_layout.addWidget(self.saved_env_path_label)
+        python_layout.addWidget(self.saved_env_frame)
+        self._update_saved_env_display()
 
         # 結果顯示區域
         result_scroll = QtWidgets.QScrollArea()
@@ -3779,48 +3774,51 @@ class MainWindow(QtWidgets.QMainWindow):
         env_info_layout = env_section.content_layout()
         env_info_layout.setSpacing(10)
 
-        # 顯示當前選中的 Python 環境
-        saved_env_path = self.settings.value("training/python_path", "")
-        saved_env_name = self.settings.value("training/env_name", "")
-        
-        if saved_env_path:
-            env_status_label = QtWidgets.QLabel("✅ 已設定訓練環境")
-            env_status_label.setStyleSheet("color: #4caf50; font-weight: bold; font-size: 12px;")
-            env_info_layout.addWidget(env_status_label)
-            
-            env_name_label = QtWidgets.QLabel(f"環境名稱: {saved_env_name}")
-            env_name_label.setStyleSheet("color: #333333; font-size: 11px;")
-            env_info_layout.addWidget(env_name_label)
-            
-            env_path_label = QtWidgets.QLabel(f"Python 路徑: {saved_env_path}")
-            env_path_label.setStyleSheet("color: #666666; font-family: monospace; font-size: 10px;")
-            env_path_label.setWordWrap(True)
-            env_info_layout.addWidget(env_path_label)
-            
-            change_button = QtWidgets.QPushButton("前往環境設定頁面更改")
-            change_button.clicked.connect(lambda: self.tab_widget.setCurrentIndex(0))
-            env_info_layout.addWidget(change_button)
-        else:
-            no_env_label = QtWidgets.QLabel("⚠️ 尚未設定訓練環境")
-            no_env_label.setStyleSheet("color: #ff9800; font-weight: bold; font-size: 12px;")
-            env_info_layout.addWidget(no_env_label)
-            
-            hint_label = QtWidgets.QLabel(
-                "請前往「1. 環境設定」分頁檢測並選擇一個 Python 環境。"
-            )
-            hint_label.setStyleSheet("color: #666666; font-size: 11px;")
-            hint_label.setWordWrap(True)
-            env_info_layout.addWidget(hint_label)
-            
-            go_button = QtWidgets.QPushButton("前往環境設定")
-            go_button.setStyleSheet(
-                "QPushButton { background-color: #2196F3; color: white; "
-                "border: none; padding: 8px 20px; border-radius: 4px; font-weight: bold; }"
-                "QPushButton:hover { background-color: #1976D2; }"
-            )
-            go_button.clicked.connect(lambda: self.tab_widget.setCurrentIndex(0))
-            env_info_layout.addWidget(go_button)
+        # 已設定訓練環境區塊（保存後顯示，可依保存狀態更新）
+        self.training_env_has_widget = QtWidgets.QWidget()
+        has_layout = QtWidgets.QVBoxLayout()
+        has_layout.setSpacing(8)
+        self.training_env_has_widget.setLayout(has_layout)
+        self.training_env_status_label = QtWidgets.QLabel("✅ 已設定訓練環境")
+        self.training_env_status_label.setStyleSheet("color: #4caf50; font-weight: bold; font-size: 12px;")
+        has_layout.addWidget(self.training_env_status_label)
+        self.training_env_name_label = QtWidgets.QLabel("")
+        self.training_env_name_label.setStyleSheet("color: #333333; font-size: 11px;")
+        has_layout.addWidget(self.training_env_name_label)
+        self.training_env_path_label = QtWidgets.QLabel("")
+        self.training_env_path_label.setStyleSheet("color: #666666; font-family: monospace; font-size: 10px;")
+        self.training_env_path_label.setWordWrap(True)
+        has_layout.addWidget(self.training_env_path_label)
+        change_button = QtWidgets.QPushButton("前往環境設定頁面更改")
+        change_button.clicked.connect(lambda: self.tab_widget.setCurrentIndex(0))
+        has_layout.addWidget(change_button)
+        env_info_layout.addWidget(self.training_env_has_widget)
 
+        # 未設定訓練環境區塊（未保存時顯示）
+        self.training_env_no_widget = QtWidgets.QWidget()
+        no_layout = QtWidgets.QVBoxLayout()
+        no_layout.setSpacing(8)
+        self.training_env_no_widget.setLayout(no_layout)
+        no_env_label = QtWidgets.QLabel("⚠️ 尚未設定訓練環境")
+        no_env_label.setStyleSheet("color: #ff9800; font-weight: bold; font-size: 12px;")
+        no_layout.addWidget(no_env_label)
+        hint_label = QtWidgets.QLabel(
+            "請前往「1. 環境設定」分頁檢測並選擇一個 Python 環境。"
+        )
+        hint_label.setStyleSheet("color: #666666; font-size: 11px;")
+        hint_label.setWordWrap(True)
+        no_layout.addWidget(hint_label)
+        go_button = QtWidgets.QPushButton("前往環境設定")
+        go_button.setStyleSheet(
+            "QPushButton { background-color: #2196F3; color: white; "
+            "border: none; padding: 8px 20px; border-radius: 4px; font-weight: bold; }"
+            "QPushButton:hover { background-color: #1976D2; }"
+        )
+        go_button.clicked.connect(lambda: self.tab_widget.setCurrentIndex(0))
+        no_layout.addWidget(go_button)
+        env_info_layout.addWidget(self.training_env_no_widget)
+
+        self._update_training_tab_env_display()
         layout.addWidget(env_section)
 
         # 數據集設定區域（可收合）
@@ -4343,8 +4341,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _display_environment_info(self, env_info: dict) -> None:
         """顯示環境信息"""
-        # 檢查是否為當前選中的訓練環境
-        saved_env_path = self.settings.value("training/python_path", "")
+        # 檢查是否為當前選中的訓練環境（從 JSON 或 QSettings 讀取）
+        saved_env_path, _ = self._get_saved_training_env()
         is_selected = saved_env_path == env_info["path"]
         
         # 環境卡片
@@ -4440,8 +4438,72 @@ class MainWindow(QtWidgets.QMainWindow):
         env_layout.addLayout(button_layout)
         self.env_result_layout.addWidget(env_frame)
 
+    def _get_training_env_json_path(self) -> str:
+        """訓練環境 JSON 檔路徑（下次開啟與模型訓練皆讀此檔）"""
+        config_dir = QtCore.QStandardPaths.writableLocation(
+            QtCore.QStandardPaths.AppConfigLocation
+        )
+        app_dir = osp.join(config_dir, __appname__)
+        return osp.join(app_dir, "training_env.json")
+
+    def _load_training_env_from_json(self) -> Optional[tuple[str, str]]:
+        """從 JSON 讀取已保存的訓練環境，回傳 (python_path, env_name) 或 None"""
+        path = self._get_training_env_json_path()
+        if not osp.isfile(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            python_path = data.get("python_path", "")
+            env_name = data.get("env_name", "")
+            if python_path:
+                return (python_path, env_name)
+        except (json.JSONDecodeError, OSError):
+            pass
+        return None
+
+    def _save_training_env_to_json(self, python_path: str, env_name: str) -> None:
+        """將選中的訓練環境寫入 JSON，供下次開啟與模型訓練使用"""
+        path = self._get_training_env_json_path()
+        dir_path = osp.dirname(path)
+        os.makedirs(dir_path, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"python_path": python_path, "env_name": env_name}, f, ensure_ascii=False, indent=2)
+
+    def _get_saved_training_env(self) -> tuple[str, str]:
+        """取得已保存的訓練環境：優先讀 JSON，若無則讀 QSettings。回傳 (python_path, env_name)。"""
+        loaded = self._load_training_env_from_json()
+        if loaded is not None:
+            return loaded
+        path = self.settings.value("training/python_path", "")
+        name = self.settings.value("training/env_name", "")
+        return (path or "", name or "")
+
+    def _update_saved_env_display(self) -> None:
+        """更新環境設定分頁的「已保存的訓練環境」區塊顯示"""
+        saved_env_path, saved_env_name = self._get_saved_training_env()
+        if saved_env_path:
+            self.saved_env_name_label.setText(f"環境名稱: {saved_env_name}")
+            self.saved_env_path_label.setText(f"Python 路徑: {saved_env_path}")
+            self.saved_env_frame.setVisible(True)
+        else:
+            self.saved_env_frame.setVisible(False)
+
+    def _update_training_tab_env_display(self) -> None:
+        """更新模型訓練分頁的「已設定訓練環境」區塊顯示"""
+        saved_env_path, saved_env_name = self._get_saved_training_env()
+        if saved_env_path:
+            self.training_env_name_label.setText(f"環境名稱: {saved_env_name}")
+            self.training_env_path_label.setText(f"Python 路徑: {saved_env_path}")
+            self.training_env_has_widget.setVisible(True)
+            self.training_env_no_widget.setVisible(False)
+        else:
+            self.training_env_has_widget.setVisible(False)
+            self.training_env_no_widget.setVisible(True)
+
     def _save_training_environment(self, python_path: str, env_name: str) -> None:
-        """保存選中的 Python 環境供模型訓練使用"""
+        """保存選中的 Python 環境供模型訓練使用（寫入 JSON，下次開啟與訓練皆讀此）"""
+        self._save_training_env_to_json(python_path, env_name)
         self.settings.setValue("training/python_path", python_path)
         self.settings.setValue("training/env_name", env_name)
         self.settings.sync()
@@ -4457,9 +4519,17 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # 重新顯示環境列表以更新選中狀態
         self._detect_python_environments()
+        self._update_saved_env_display()
+        self._update_training_tab_env_display()
 
     def _clear_training_environment(self) -> None:
-        """清除已選中的訓練環境"""
+        """清除已選中的訓練環境（刪除 JSON 並清除 QSettings）"""
+        json_path = self._get_training_env_json_path()
+        if osp.isfile(json_path):
+            try:
+                os.remove(json_path)
+            except OSError:
+                pass
         self.settings.remove("training/python_path")
         self.settings.remove("training/env_name")
         self.settings.sync()
@@ -4472,6 +4542,8 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # 重新顯示環境列表以更新選中狀態
         self._detect_python_environments()
+        self._update_saved_env_display()
+        self._update_training_tab_env_display()
 
     def _select_dataset_directory(self) -> None:
         """選擇 YOLO 數據集目錄"""
@@ -4678,8 +4750,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _start_training(self) -> None:
         """開始訓練模型"""
-        # 檢查訓練環境
-        saved_env_path = self.settings.value("training/python_path", "")
+        # 檢查訓練環境（從 JSON 或 QSettings 讀取）
+        saved_env_path, _ = self._get_saved_training_env()
         if not saved_env_path:
             QMessageBox.warning(
                 self,
@@ -4907,8 +4979,8 @@ class MainWindow(QtWidgets.QMainWindow):
             QMessageBox.warning(self, "錯誤", "請選擇輸出目錄。")
             return
         
-        # 檢查訓練環境（用於執行轉換的 Python 環境）
-        saved_env_path = self.settings.value("training/python_path", "")
+        # 檢查訓練環境（從 JSON 或 QSettings 讀取，用於執行轉換的 Python 環境）
+        saved_env_path, _ = self._get_saved_training_env()
         if not saved_env_path:
             QMessageBox.warning(
                 self,
