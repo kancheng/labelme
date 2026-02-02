@@ -3890,8 +3890,8 @@ class MainWindow(QtWidgets.QMainWindow):
         training_params_layout.addWidget(QtWidgets.QLabel("訓練輪數 (Epochs):"), 2, 0)
         self.epochs_spinbox = QtWidgets.QSpinBox()
         self.epochs_spinbox.setMinimum(1)
-        self.epochs_spinbox.setMaximum(1000)
-        self.epochs_spinbox.setValue(100)
+        self.epochs_spinbox.setMaximum(999999)
+        self.epochs_spinbox.setValue(2000)
         training_params_layout.addWidget(self.epochs_spinbox, 2, 1)
         
         # 圖像大小
